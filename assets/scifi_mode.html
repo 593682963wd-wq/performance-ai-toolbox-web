@@ -861,6 +861,7 @@
   $('btn-tools').addEventListener('click', ()=>toggleTools());
 
   // 【融合】页面加载后立即将工具卡片嵌入场景（低透明度·与粒子同在）
+  const _hoverWP = new THREE.Vector3();
   (async function(){
     const tools = await fetchTools();
     if(tools.length){
@@ -1281,6 +1282,13 @@
     const pos = positions, home = homeBase, vel = velocity;
     const mx=mouse.x, my=mouse.y, useMouse = state.mouse && mx<9000;
 
+    // 【粒子被吸附】获取当前 hover 卡片世界坐标
+    let attrX=null, attrY=null, attrZ=null;
+    if(toolsState.hover){
+      toolsState.hover.getWorldPosition(_hoverWP);
+      attrX = _hoverWP.x; attrY = _hoverWP.y; attrZ = _hoverWP.z;
+    }
+
     for(let i=0;i<PARTICLE_COUNT;i+=1){
       const ix=i*3, iy=ix+1, iz=ix+2;
       const hx=home[ix]*sc, hy=home[iy]*sc, hz=home[iz]*sc;
@@ -1308,6 +1316,19 @@
           const f = (1 - d2/8000)*4;
           vel[ix] += ddx/(Math.sqrt(d2)+1)*f;
           vel[iy] += ddy/(Math.sqrt(d2)+1)*f;
+        }
+      }
+
+      // 【粒子被吸附到 hover 卡片】
+      if(attrX!=null){
+        const dx = attrX-pos[ix], dy = attrY-pos[iy], dz = attrZ-pos[iz];
+        const ad2 = dx*dx+dy*dy+dz*dz;
+        if(ad2 < 16000){
+          const af = (1 - ad2/16000)*1.6;
+          const ainv = 1/(Math.sqrt(ad2)+1);
+          vel[ix] += dx*ainv*af;
+          vel[iy] += dy*ainv*af;
+          vel[iz] += dz*ainv*af;
         }
       }
 
