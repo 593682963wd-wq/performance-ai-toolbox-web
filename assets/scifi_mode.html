@@ -827,6 +827,10 @@
         sp.material.needsUpdate = true;
         sp.userData.tool = updated;
         sp.userData.launchedAt = performance.now();
+        // 【启动烟花】记录爆炸中心 + 时间窗
+        const wp = new THREE.Vector3();
+        sp.getWorldPosition(wp);
+        toolsState.burst = { x:wp.x, y:wp.y, z:wp.z, until: performance.now()+1100 };
       }
     }catch(e){ toolToast('请求失败：'+e.message, false); }
   }
@@ -1289,6 +1293,19 @@
       attrX = _hoverWP.x; attrY = _hoverWP.y; attrZ = _hoverWP.z;
     }
 
+    // 【启动烟花】检查爆炸是否还在有效期
+    let burstActive=false, burstX=0,burstY=0,burstZ=0, burstAmp=0;
+    if(toolsState.burst){
+      const remain = toolsState.burst.until - performance.now();
+      if(remain>0){
+        burstActive=true;
+        burstX = toolsState.burst.x; burstY = toolsState.burst.y; burstZ = toolsState.burst.z;
+        burstAmp = remain / 1100;  // 1 -> 0
+      } else {
+        toolsState.burst = null;
+      }
+    }
+
     for(let i=0;i<PARTICLE_COUNT;i+=1){
       const ix=i*3, iy=ix+1, iz=ix+2;
       const hx=home[ix]*sc, hy=home[iy]*sc, hz=home[iz]*sc;
@@ -1329,6 +1346,19 @@
           vel[ix] += dx*ainv*af;
           vel[iy] += dy*ainv*af;
           vel[iz] += dz*ainv*af;
+        }
+      }
+
+      // 【启动烟花】从卡片中心向外冲击波
+      if(burstActive){
+        const bdx = pos[ix]-burstX, bdy = pos[iy]-burstY, bdz = pos[iz]-burstZ;
+        const bd2 = bdx*bdx+bdy*bdy+bdz*bdz;
+        if(bd2 < 22000){
+          const bf = (1 - bd2/22000)*burstAmp*8;
+          const binv = 1/(Math.sqrt(bd2)+1);
+          vel[ix] += bdx*binv*bf;
+          vel[iy] += bdy*binv*bf;
+          vel[iz] += bdz*binv*bf;
         }
       }
 
