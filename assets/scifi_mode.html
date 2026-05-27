@@ -341,8 +341,11 @@
   import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
   // 【Fingerpose】业界事实标准的 MediaPipe 手势识别库（负载失败会降级到原启发式检测）
   let fp = null;
-  try { fp = await import('fingerpose'); }
-  catch(e){ console.warn('[scifi] fingerpose load failed, using legacy heuristics', e); }
+  try {
+    const mod = await import('fingerpose');
+    fp = mod.default || mod;
+    if(!fp || !fp.GestureEstimator) throw new Error('GestureEstimator not exported');
+  } catch(e){ console.warn('[scifi] fingerpose load failed, using legacy heuristics', e); fp = null; }
 
   const $ = id => document.getElementById(id);
   const setStep = t => { const s=$('step'); if(s) s.textContent = t; };
@@ -1055,7 +1058,8 @@
 
   // 【Fingerpose】构造 5 个核心手势的估计器（拳头/开掌/食指/Peace/Thumbs Up）
   let fpEstimator = null;
-  if(fp){
+  try {
+    if(fp){
     const fist = new fp.GestureDescription('fist');
     for(const fg of [fp.Finger.Index, fp.Finger.Middle, fp.Finger.Ring, fp.Finger.Pinky]){
       fist.addCurl(fg, fp.FingerCurl.FullCurl, 1.0);
@@ -1089,7 +1093,8 @@
       fp.Gestures.ThumbsUpGesture,
       fp.Gestures.VictoryGesture,
     ]);
-  }
+    }
+  } catch(e){ console.warn('[scifi] fingerpose estimator build failed', e); fpEstimator = null; fp = null; }
 
   function startHands(){
     if(hands) return;
@@ -1190,7 +1195,7 @@
     }
     // 【Fingerpose】用业界成熟的 curl/direction 模型识别 5 个离散手势
     let fpTop = null, fpScore = 0;
-    if(fp){
+    if(fpEstimator){
       try{
         const lmArr = h.map(p => [p.x, p.y, p.z||0]);
         const r = fpEstimator.estimate(lmArr, 7.5);
