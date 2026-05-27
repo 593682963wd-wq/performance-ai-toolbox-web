@@ -1443,14 +1443,17 @@
     const dt = Math.min(clock.getDelta(), 0.05);
     const t  = clock.elapsedTime;
 
-    // 旋转
+    // 旋转：粒子 + 工具图标 一起转（程序为主，粒子衬托）
     if(!state.rotFrozen){
       points.rotation.y += dt * state.rot * 0.5;
-      // 电影模式下不再覆盖 pitch（让手势冲量驱动）；否则保留自然摆动
+      // 电影模式下不再覆盖 pitch（让手势驱动）；否则保留自然摆动
       if(!state.cinemaMode){
         points.rotation.x = Math.sin(t*0.1) * 0.06;
       }
     }
+    // 工具图标始终跟随粒子场旋转
+    toolsState.group.rotation.x = points.rotation.x;
+    toolsState.group.rotation.y = points.rotation.y;
 
     // 粒子动画：home + 噪声 + 全局缩放 + 鼠标推力 + 爆裂衰减
     const explode = performance.now() < state.explodeUntil;
