@@ -233,8 +233,8 @@
       <input type="color" id="color2" value="#bf6bff">
       <label>粒径 <span class="val" id="v-size">1.4</span></label>
       <input type="range" id="size" min="0.4" max="3" step="0.1" value="1.4">
-      <label>亮度 <span class="val" id="v-glow">1.0</span></label>
-      <input type="range" id="glow" min="0.3" max="2.2" step="0.05" value="1.0">
+      <label>亮度 <span class="val" id="v-glow">0.55</span></label>
+      <input type="range" id="glow" min="0.3" max="2.2" step="0.05" value="0.55">
     </div>
 
     <div class="group">
@@ -366,7 +366,7 @@
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 1.0, 0.6, 0.0);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 0.55, 0.6, 0.0);
   composer.addPass(bloom);
 
   // ═══════════ 2. 粒子贴图（圆形软晕）═══════════
@@ -564,7 +564,7 @@
 
   // ═══════════ 4. 控件绑定 ═══════════
   const state = {
-    color1:'#4fc3f7', color2:'#bf6bff', size:1.4, glow:1.0,
+    color1:'#4fc3f7', color2:'#bf6bff', size:1.4, glow:0.55,
     rot:0.4, noise:0.6, gesture:true, mouse:true,
     scale:1.0, // 由手势驱动
     explodeUntil:0,
@@ -576,6 +576,7 @@
     cinemaMode:true,   // 🎬 单手电影模式：张开放大/握拳缩小/手偏转视角
     camYawTarget:0, camPitchTarget:0, // 相机旋转目标（二级平滑用）
     camZoomTarget:null, // 电影模式下 camera.z 目标
+    camYawVel:0, camPitchVel:0, // 冲量模型：角速度，每帧衰减、滑动时注入
   };
 
   // 配色预设（✌️ 切换）
@@ -1239,21 +1240,26 @@
                      THREE.MathUtils.smoothstep(hd, 0.14, 0.50));
         state.camZoomTarget = zT;
 
-        // 挥动方向（帧间速度）→ 累计旋转（持续挥手持续转）
+        // 【挥动方向】→ flick 冲量（皮球/地球仪手感：划一下转一下，自动衰减，不粘手）
         if(gesture.prevCinX != null){
           const dvx = gesture.xSm - gesture.prevCinX;
           const dvy = gesture.ySm - gesture.prevCinY;
           const sp  = Math.hypot(dvx, dvy);
-          if(sp > 0.008){ // 死区，停手就停转
-            state.camYawTarget   += dvx * 2.8 * state.sensitivity;
-            state.camPitchTarget += -dvy * 2.2 * state.sensitivity;
-            state.camYawTarget   = THREE.MathUtils.clamp(state.camYawTarget,   -Math.PI*1.2, Math.PI*1.2);
-            state.camPitchTarget = THREE.MathUtils.clamp(state.camPitchTarget, -0.9, 0.9);
+          const _now = performance.now();
+          // 需要明显挥动 (sp>0.012) 且距离上次注入≥120ms，避免连续粘附
+          if(sp > 0.012 && (_now - (gesture.lastFlickT||0)) > 120){
+            gesture.lastFlickT = _now;
+            // 一次冲量：手挥动产生角速度
+            state.camYawVel   += dvx * 6.0 * state.sensitivity;
+            state.camPitchVel += -dvy * 5.0 * state.sensitivity;
+            // 上限避免炸
+            state.camYawVel   = THREE.MathUtils.clamp(state.camYawVel,   -0.08, 0.08);
+            state.camPitchVel = THREE.MathUtils.clamp(state.camPitchVel, -0.06, 0.06);
           }
         }
         gesture.prevCinX = gesture.xSm;
         gesture.prevCinY = gesture.ySm;
-        setLive(true, '🖐 D='+hd.toFixed(2)+' Z='+zT.toFixed(0)+' YAW='+state.camYawTarget.toFixed(2));
+        setLive(true, '🖐 D='+hd.toFixed(2)+' Z='+zT.toFixed(0)+' \u03c9='+state.camYawVel.toFixed(3));
       } else {
         gesture.prevCinX = null;
         gesture.prevCinY = null;
@@ -1537,15 +1543,21 @@
       camera.position.z += (state.camTargetZ - camera.position.z)*0.06;
     }
 
-    // 🎬 电影模式：手势驱动的相机 zoom + yaw/pitch（连续平滑，无离散触发）
+    // 🎬 电影模式：手势驱动的相机 zoom + 冲量旋转（皮球/地球仪手感）
     if(state.cinemaMode){
       if(state.camZoomTarget != null){
         camera.position.z += (state.camZoomTarget - camera.position.z) * 0.08;
       }
-      // 二级平滑相机朝向（lookAt 后再 yaw/pitch 偏移）
-      const yawNow = camera.rotation.y, pitNow = camera.rotation.x;
-      camera.rotation.y = yawNow + (state.camYawTarget - yawNow) * 0.08;
-      camera.rotation.x = pitNow + (state.camPitchTarget - pitNow) * 0.08;
+      // 冲量模型：相机旋转积分角速度，每帧衰减（damping 0.93/帧，停手后约 1 秒衰减完）
+      camera.rotation.y += state.camYawVel;
+      camera.rotation.x += state.camPitchVel;
+      state.camYawVel   *= 0.93;
+      state.camPitchVel *= 0.93;
+      // 极小值归零，避免长期漂移
+      if(Math.abs(state.camYawVel)   < 0.0002) state.camYawVel = 0;
+      if(Math.abs(state.camPitchVel) < 0.0002) state.camPitchVel = 0;
+      // pitch 软限位
+      camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, -0.9, 0.9);
     }
 
     // 工具星座更新
