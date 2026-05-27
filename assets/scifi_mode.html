@@ -1227,56 +1227,55 @@
       const pointMode = Ei2 && !Em2 && !Er2 && !Ep2;
       const palmOpen  = gesture.opennessSm > 0.65 && !pointMode;
 
-      // ── 张开手 → 距离驱动 zoom + 挥动方向驱动旋转 ──
-      if(palmOpen){
+      // ── 🤏 捏合拖动 → 旋转场景（Gemini 风格：捏住=抓握，拖到哪转到哪） ──
+      const pinchTh = 0.22;
+      const isPinchingNow = gesture.pinchSm < pinchTh;
+      if(isPinchingNow){
+        if(!gesture.dragActive){
+          gesture.dragActive = true;
+          gesture.dragLastX = gesture.xSm;
+          gesture.dragLastY = gesture.ySm;
+          flashTag('g-pinch');
+        } else {
+          const dx = gesture.xSm - gesture.dragLastX;
+          const dy = gesture.ySm - gesture.dragLastY;
+          // 直接拖动旋转（不是冲量），sensitivity ≈ 3.5 rad / 归一化单位
+          const sens = 3.5 * state.sensitivity;
+          points.rotation.y += dx * sens;
+          points.rotation.x = THREE.MathUtils.clamp(points.rotation.x - dy * sens * 0.8, -0.9, 0.9);
+          // 同步惯性，松开后自然续转
+          state.camYawVel   = dx * sens * 0.4;
+          state.camPitchVel = -dy * sens * 0.32;
+          gesture.dragLastX = gesture.xSm;
+          gesture.dragLastY = gesture.ySm;
+          setLive(true, '🤏 拖动旋转 yaw='+points.rotation.y.toFixed(2)+' pitch='+points.rotation.x.toFixed(2));
+        }
+      } else {
+        gesture.dragActive = false;
+      }
+
+      // ── 🖐 张开手 → 距离驱动 zoom ──
+      if(palmOpen && !isPinchingNow){
         // 【手到镜头远近】用 21 个 landmark 的 bounding box 对角线，比单根线更稳
         let minX=1,maxX=0,minY=1,maxY=0;
         for(const p of h){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; }
         const handDiag = Math.hypot(maxX-minX, maxY-minY);
-        // 平滑（避免单帧噪声）
         if(gesture.handDiagSm == null) gesture.handDiagSm = handDiag;
         gesture.handDiagSm += (handDiag - gesture.handDiagSm) * 0.25;
-        // 经验范围：手伸远 ≈ 0.12，手贴近镜头 ≈ 0.55；超出 clamp
         const hd = gesture.handDiagSm;
         const zT = THREE.MathUtils.lerp(720, 140,
                      THREE.MathUtils.smoothstep(hd, 0.14, 0.50));
         state.camZoomTarget = zT;
-
-        // 【挥动方向】→ flick 冲量（皮球/地球仪手感：划一下转一下，自动衰减，不粘手）
-        if(gesture.prevCinX != null){
-          const dvx = gesture.xSm - gesture.prevCinX;
-          const dvy = gesture.ySm - gesture.prevCinY;
-          const sp  = Math.hypot(dvx, dvy);
-          const _now = performance.now();
-          // 提高阈值：必须明显挥动 (sp>0.025) 且距上次冲量≥200ms，避免随便一动就转
-          if(sp > 0.025 && (_now - (gesture.lastFlickT||0)) > 200){
-            gesture.lastFlickT = _now;
-            // 冲量更小：避免随便一碰就转飞
-            state.camYawVel   += dvx * 2.0 * state.sensitivity;
-            state.camPitchVel += -dvy * 1.6 * state.sensitivity;
-            state.camYawVel   = THREE.MathUtils.clamp(state.camYawVel,   -0.05, 0.05);
-            state.camPitchVel = THREE.MathUtils.clamp(state.camPitchVel, -0.04, 0.04);
-          }
-        }
-        gesture.prevCinX = gesture.xSm;
-        gesture.prevCinY = gesture.ySm;
-        setLive(true, '🖐 D='+hd.toFixed(2)+' Z='+zT.toFixed(0)+' \u03c9='+state.camYawVel.toFixed(3));
-      } else {
-        gesture.prevCinX = null;
-        gesture.prevCinY = null;
+        setLive(true, '🖐 缩放 D='+hd.toFixed(2)+' Z='+zT.toFixed(0));
       }
 
-      // ── 食指：光标投射 + 捏合启动 ──
-      // __scifiGP.move/pinch 已在上方按 idxTip 实时驱动（命中 sprite 自动放大 1.45×）
-      // 这里只确认 pinch 仍可双击触发爆裂
+      // 双击捏合仍然触发爆裂（保留原有彩蛋）
       const _nowC = performance.now();
-      const pinchTh = 0.30 + (1-state.sensitivity)*0.10;
-      if(gesture.pinchSm < pinchTh && !gesture.pinchActive){
+      if(isPinchingNow && !gesture.pinchActive){
         gesture.pinchActive = true;
         if(_nowC - gesture.lastTapT < 420){ $('btn-explode').click(); flashTag('g-pinch'); setLive(true,'🤏🤏 EXPLODE'); }
         gesture.lastTapT = _nowC;
-        if(pointMode){ flashTag('g-pinch'); setLive(true,'👉🤏 TAP'); }
-      } else if(gesture.pinchSm >= pinchTh){
+      } else if(!isPinchingNow){
         gesture.pinchActive = false;
       }
       return; // 跳过下方的离散手势分支
