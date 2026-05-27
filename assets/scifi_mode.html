@@ -790,9 +790,8 @@
     tools.forEach((t,i)=>{
       const tex = drawToolCard(t);
       const mat = new THREE.SpriteMaterial({
-        map: tex, transparent:true, opacity:0.55,
+        map: tex, transparent:true, opacity:0.92,
         depthWrite:false, depthTest:false,
-        blending: THREE.AdditiveBlending,
       });
       const sp = new THREE.Sprite(mat);
       const home = homeFor(i, N);
@@ -827,10 +826,24 @@
         sp.material.needsUpdate = true;
         sp.userData.tool = updated;
         sp.userData.launchedAt = performance.now();
-        // 【启动烟花】记录爆炸中心 + 时间窗
+        // 【启动烟花】对周围粒子施加一次性冲击速度（不是持续力）
         const wp = new THREE.Vector3();
         sp.getWorldPosition(wp);
-        toolsState.burst = { x:wp.x, y:wp.y, z:wp.z, until: performance.now()+1100 };
+        toolsState.burst = { x:wp.x, y:wp.y, z:wp.z, until: performance.now()+900 };
+        // 直接在速度缓冲区叠加向外冲击波（主视觉）
+        const BR2 = 60000; // 半径^2
+        for(let i=0;i<PARTICLE_COUNT;i++){
+          const ix=i*3, iy=ix+1, iz=ix+2;
+          const bdx = positions[ix]-wp.x, bdy = positions[iy]-wp.y, bdz = positions[iz]-wp.z;
+          const bd2 = bdx*bdx+bdy*bdy+bdz*bdz;
+          if(bd2 < BR2){
+            const f = (1 - bd2/BR2) * 90;
+            const inv = 1/(Math.sqrt(bd2)+0.5);
+            velocity[ix] += bdx*inv*f;
+            velocity[iy] += bdy*inv*f;
+            velocity[iz] += bdz*inv*f;
+          }
+        }
       }
     }catch(e){ toolToast('请求失败：'+e.message, false); }
   }
@@ -854,7 +867,7 @@
       state.camTargetZ = 520;
     }else{
       toolsState.on = false;
-      toolsState.targetAlpha = 0.55;       // 退出后仍漂浮于粒子中
+      toolsState.targetAlpha = 0.85;       // 退出后仍漂浮于粒子中（可读）
       scifiCursor.classList.remove('on','hover','pinch');
       $('btn-tools').style.color = '';
       $('btn-tools').style.textShadow = '';
@@ -872,7 +885,7 @@
       buildToolSprites(tools);
       toolsState.loaded = true;
       toolsState.group.visible = true;
-      toolsState.targetAlpha = 0.55;
+      toolsState.targetAlpha = 0.85;
     }
   })();
 
@@ -1233,7 +1246,9 @@
     }
 
     // 张开手 → openness 控制 scale；垂直移动 → 调整旋转速度
-    if(gesture.opennessSm > 0.7){
+    // 【优化】同时使用 extCount≥4 作为开掌傅助判定，避免 openness 标定偏差造成失败
+    const palmOpen = (gesture.opennessSm > 0.7) || (extCount >= 4 && gesture.opennessSm > 0.45);
+    if(palmOpen){
       const target = THREE.MathUtils.clamp(gesture.opennessSm*1.3, 0.35, 1.7);
       // 灵敏度也提升收敛速度
       state.scale += (target - state.scale) * Math.min(0.35, k*1.8);
