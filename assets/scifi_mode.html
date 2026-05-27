@@ -251,9 +251,17 @@
       <div class="toggle on" id="t-mouse" style="margin-top:6px">
         <span>鼠标引力</span><span class="sw"></span>
       </div>
+      <label style="margin-top:10px">手势灵敏度 <span class="val" id="v-sens">1.0</span></label>
+      <input type="range" id="sens" min="0.3" max="2.5" step="0.05" value="1.0">
+      <label style="margin-top:6px">手势平滑 <span class="val" id="v-smooth">0.35</span></label>
+      <input type="range" id="smooth" min="0.08" max="0.9" step="0.02" value="0.35">
       <div class="row" style="margin-top:8px">
         <button class="mbtn" id="btn-reset">重置视角</button>
         <button class="mbtn" id="btn-explode">爆裂</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="mbtn" id="btn-cal">校准手掌</button>
+        <button class="mbtn" id="btn-help">手势速查</button>
       </div>
     </div>
   </div>
@@ -272,10 +280,37 @@
 
   <!-- 手势提示 -->
   <div id="gesture-hud">
-    <span class="gtag" id="g-pinch">PINCH · 缩放</span>
-    <span class="gtag" id="g-open">OPEN · 扩散</span>
-    <span class="gtag" id="g-swipe">SWIPE · 切换</span>
-    <span class="gtag" id="g-click">TAP · 点击</span>
+    <span class="gtag" id="g-open">🖐 张开 · 扩散</span>
+    <span class="gtag" id="g-pinch">🤏 捏合 · 闪击</span>
+    <span class="gtag" id="g-swipe">👉 滑动 · 切模型</span>
+    <span class="gtag" id="g-zoom">✋✋ 双手 · 推拉</span>
+    <span class="gtag" id="g-fist">✊ 拳头 · 冻结</span>
+    <span class="gtag" id="g-peace">✌️ Peace · 配色</span>
+    <span class="gtag" id="g-thumb-up">👍 加大粒子</span>
+    <span class="gtag" id="g-thumb-dn">👎 缩小粒子</span>
+    <span class="gtag" id="g-tilt">↕ 抬手 · 调旋转</span>
+  </div>
+
+  <!-- 手势速查浮层 -->
+  <div id="help-mask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:600;align-items:center;justify-content:center;backdrop-filter:blur(10px)">
+    <div style="background:linear-gradient(160deg,rgba(15,23,42,.95),rgba(30,41,59,.95));border:1px solid rgba(79,195,247,.45);border-radius:18px;padding:28px 32px;width:560px;max-width:92vw;color:#cfe8ff;box-shadow:0 30px 80px rgba(79,195,247,.25)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+        <div style="font-size:18px;font-weight:700;color:#a5e7ff;letter-spacing:1px">// GESTURE CHEAT-SHEET</div>
+        <button id="help-close" style="background:transparent;border:1px solid rgba(255,255,255,.2);color:#cfe8ff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:18px">×</button>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:10px 18px;font-size:14px;line-height:1.7">
+        <div>🖐 张开手掌</div><div>粒子向外扩散（手张多大粒子飞多远）</div>
+        <div>🤏 拇指食指捏</div><div>收缩 / 单击：闪烁；快速双击：爆裂</div>
+        <div>👉 单手左右挥</div><div>切换下一个 / 上一个模型</div>
+        <div>✋✋ 双手推拉</div><div>双手腕拉远拉近 = 摄像机推近 / 拉远</div>
+        <div>✊ 握拳</div><div>冻结自转（再次张开恢复）</div>
+        <div>✌️ Peace</div><div>切换全息配色方案</div>
+        <div>👍 拇指朝上</div><div>放大粒径</div>
+        <div>👎 拇指朝下</div><div>缩小粒径</div>
+        <div>↕ 抬高 / 放低</div><div>张开手时上下移动 = 调节自转速度</div>
+      </div>
+      <div style="margin-top:18px;font-size:12px;color:#7aa3c7;line-height:1.7">提示：在右侧面板调「手势灵敏度」让响应更跟手；调「手势平滑」越大越稳越小越敏捷。点「校准手掌」用你的手张开做基准。</div>
+    </div>
   </div>
 
   <div id="err"></div>
@@ -523,7 +558,32 @@
     rot:0.4, noise:0.6, gesture:true, mouse:true,
     scale:1.0, // 由手势驱动
     explodeUntil:0,
+    sensitivity:1.0,   // 0.3-2.5，越高越灵敏
+    smooth:0.35,       // 0.08-0.9，越高越稳越大延迟
+    rotFrozen:false,   // 拳头冻结
+    handCal:4.2,       // openness 标定基准
   };
+
+  // 配色预设（✌️ 切换）
+  const COLOR_PRESETS = [
+    ['#4fc3f7','#bf6bff'], // 默认 青→紫
+    ['#22d3ee','#a78bfa'], // 冰蓝→淡紫
+    ['#f472b6','#fde047'], // 粉→金
+    ['#34d399','#60a5fa'], // 翡翠→天蓝
+    ['#fb923c','#f43f5e'], // 橙→红
+    ['#e879f9','#22d3ee'], // 品红→青
+    ['#fafafa','#fbbf24'], // 白→金
+    ['#06b6d4','#ec4899'], // 青→洋红
+  ];
+  let presetIdx = 0;
+  function applyPreset(i){
+    presetIdx = (i + COLOR_PRESETS.length) % COLOR_PRESETS.length;
+    const [a,b] = COLOR_PRESETS[presetIdx];
+    state.color1=a; state.color2=b;
+    $('color1').value=a; $('color2').value=b;
+    $('v-color').textContent=a; $('v-color2').textContent=b;
+    C1.set(a); C2.set(b); paintColors();
+  }
 
   $('color1').addEventListener('input', e=>{
     state.color1=e.target.value; $('v-color').textContent=state.color1;
@@ -541,7 +601,21 @@
     $('v-rot').textContent=state.rot.toFixed(2); });
   $('noise').addEventListener('input', e=>{ state.noise=+e.target.value;
     $('v-noise').textContent=state.noise.toFixed(2); });
+  $('sens').addEventListener('input', e=>{ state.sensitivity=+e.target.value;
+    $('v-sens').textContent=state.sensitivity.toFixed(2); });
+  $('smooth').addEventListener('input', e=>{ state.smooth=+e.target.value;
+    $('v-smooth').textContent=state.smooth.toFixed(2); });
   $('text-input').addEventListener('change', ()=>{ if(currentModel==='text') applyModel('text'); });
+  $('btn-help').addEventListener('click', ()=>{ $('help-mask').style.display='flex'; });
+  $('help-close').addEventListener('click', ()=>{ $('help-mask').style.display='none'; });
+  $('help-mask').addEventListener('click', e=>{ if(e.target.id==='help-mask') $('help-mask').style.display='none'; });
+  $('btn-cal').addEventListener('click', ()=>{
+    // 用当前手张开作为基准（如果没手则提示）
+    if(gesture.rawTipsFar>0){
+      state.handCal = gesture.rawTipsFar / (gesture.rawHandSize+1e-4);
+      setLive(true,'CAL OK · '+state.handCal.toFixed(2));
+    }else setLive(true,'请把张开的手对准摄像头');
+  });
 
   function bindToggle(id, key){
     const el=$(id); el.addEventListener('click', ()=>{
@@ -598,8 +672,19 @@
   const camOverlay = $('cam-overlay');
   const camCtx = camOverlay.getContext('2d');
   let hands=null, camStream=null, camActive=false;
-  const gesture = { active:false, openness:1.0, x:0, y:0, prevX:null, lastSwipeT:0,
-                    pinchActive:false, lastTapT:0, twoHand:false, twoDist:null };
+  const gesture = {
+    active:false, twoHand:false,
+    // 平滑后的特征
+    opennessSm:1.0, xSm:0.5, ySm:0.5, pinchSm:1.0, twoDistSm:null,
+    // 原始
+    openness:1.0, x:0.5, y:0.5, pinch:1.0,
+    rawTipsFar:0, rawHandSize:0,
+    // 边缘检测 / 节流
+    prevX:null, prevY:null, lastSwipeT:0,
+    pinchActive:false, lastTapT:0, tapBurst:0,
+    lastPresetT:0, lastThumbT:0, lastFistFlipT:0,
+    rotAdjustBase:null,
+  };
 
   function setLive(on, label){
     camWrap.querySelector('.head .live').textContent = on?'● LIVE':'● OFFLINE';
@@ -651,7 +736,9 @@
     if(hands) return;
     hands = new window.Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands/'+f});
     hands.setOptions({
-      maxNumHands:2, modelComplexity:0, minDetectionConfidence:0.55, minTrackingConfidence:0.55,
+      maxNumHands:2, modelComplexity:0,
+      minDetectionConfidence:0.5, minTrackingConfidence:0.5,
+      selfieMode:true,
     });
     hands.onResults(onHandResults);
     const c = new window.Camera(camVideo, {
@@ -664,11 +751,11 @@
   function onHandResults(res){
     camCtx.save();
     camCtx.clearRect(0,0,camOverlay.width,camOverlay.height);
-    // 镜像绘制（video 已 scaleX(-1)，overlay 也镜像）
     camCtx.translate(camOverlay.width,0); camCtx.scale(-1,1);
     const lm = res.multiHandLandmarks || [];
     if(!lm.length){
-      gesture.active=false; gesture.twoHand=false; gesture.twoDist=null; gesture.prevX=null;
+      gesture.active=false; gesture.twoHand=false; gesture.twoDistSm=null;
+      gesture.prevX=null; gesture.prevY=null; gesture.rotAdjustBase=null;
       setLive(true,'IDLE');
       camCtx.restore(); return;
     }
@@ -684,81 +771,178 @@
     });
     camCtx.restore();
 
+    if(!state.gesture){ setLive(true,'GESTURE OFF'); return; }
+
     // ── 单手主控 ──
     const h = lm[0];
-    const wrist=h[0], idxTip=h[8], thumbTip=h[4], mcp=h[9], pinkyMcp=h[17];
+    const wrist=h[0], idxTip=h[8], thumbTip=h[4], mcp=h[9];
     const handSize = Math.hypot(mcp.x-wrist.x, mcp.y-wrist.y) + 1e-4;
-    const pinchDist = Math.hypot(idxTip.x-thumbTip.x, idxTip.y-thumbTip.y) / handSize;
-    // openness: 张开 ≈ 1，握拳 ≈ 0
+    const pinchRaw = Math.hypot(idxTip.x-thumbTip.x, idxTip.y-thumbTip.y) / handSize;
     let tipsFar=0;
     [8,12,16,20].forEach(k=>{ tipsFar += Math.hypot(h[k].x-wrist.x, h[k].y-wrist.y); });
-    const openness = Math.min(1.4, (tipsFar/handSize)/4.2); // 经验缩放
+    gesture.rawTipsFar = tipsFar;
+    gesture.rawHandSize = handSize;
+    // 用 handCal 校准，让 openness 更接近 0~1
+    const opennessRaw = Math.min(1.5, (tipsFar/handSize) / state.handCal);
 
+    // 灵敏度 → 平滑系数
+    // smooth 滑块在 0.08(灵敏) ~ 0.9(平滑)，sensitivity 反向缩放
+    const sens = state.sensitivity;
+    const k = THREE.MathUtils.clamp((1 - state.smooth) * sens, 0.06, 0.95);
+    // EMA
+    gesture.openness    = opennessRaw;
+    gesture.opennessSm += (opennessRaw - gesture.opennessSm) * k;
+    gesture.pinch       = pinchRaw;
+    gesture.pinchSm    += (pinchRaw - gesture.pinchSm) * Math.min(0.85, k*1.8);
+    const rawX = 1 - wrist.x;
+    const rawY = wrist.y;
+    gesture.x = rawX; gesture.y = rawY;
+    gesture.xSm += (rawX - gesture.xSm) * k;
+    gesture.ySm += (rawY - gesture.ySm) * k;
     gesture.active = true;
-    gesture.openness = openness;
-    gesture.x = 1 - wrist.x;  // 镜像
-    gesture.y = wrist.y;
 
-    // 双手缩放（两手腕距离）
+    // ────────── 双手缩放 ──────────
     if(lm.length>=2){
       gesture.twoHand=true;
       const w2 = lm[1][0];
       const d = Math.hypot(wrist.x-w2.x, wrist.y-w2.y);
-      if(gesture.twoDist!=null){
-        const dz = (d - gesture.twoDist)*8;
-        camera.position.z = THREE.MathUtils.clamp(camera.position.z - dz*30, 120, 900);
-      }
-      gesture.twoDist = d;
-      setLive(true,'TWO-HAND ZOOM');
-      flashTag('g-pinch');
+      if(gesture.twoDistSm==null) gesture.twoDistSm = d;
+      gesture.twoDistSm += (d - gesture.twoDistSm) * k;
+      // 直接用平滑距离映射到 camera.z（绝对映射，不抖）
+      // 双手贴近 d≈0.05 → 远；双手张到 d≈0.9 → 近
+      const tgtZ = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(820, 140, THREE.MathUtils.smoothstep(gesture.twoDistSm, 0.08, 0.85)),
+        120, 900);
+      camera.position.z += (tgtZ - camera.position.z) * Math.min(0.4, k*1.5);
+      setLive(true,'✋✋ ZOOM '+camera.position.z.toFixed(0));
+      flashTag('g-zoom');
+      // 双手时其它手势暂停
+      return;
     }else{
-      gesture.twoHand=false; gesture.twoDist=null;
+      gesture.twoHand=false; gesture.twoDistSm=null;
     }
 
-    // 滑动切模型（仅单手且张开）
-    if(!gesture.twoHand && openness>0.7){
+    // ────────── 单手手势识别 ──────────
+    // 各手指是否伸直（用 tip 与 PIP 关节相对 wrist 距离比较）
+    function ext(tip, pip){
+      return Math.hypot(h[tip].x-wrist.x, h[tip].y-wrist.y) >
+             Math.hypot(h[pip].x-wrist.x, h[pip].y-wrist.y) * 1.04;
+    }
+    const Ei = ext(8,6);   // index
+    const Em = ext(12,10); // middle
+    const Er = ext(16,14); // ring
+    const Ep = ext(20,18); // pinky
+    // 拇指方向（用 thumb tip 相对 wrist 的 y）
+    const thumbUp   = (h[4].y < h[2].y - 0.06);
+    const thumbDown = (h[4].y > h[2].y + 0.06);
+    const thumbExt  = Math.hypot(h[4].x-h[2].x, h[4].y-h[2].y) > 0.06;
+    const extCount  = Ei+Em+Er+Ep;
+    const now = performance.now();
+
+    // ✊ 拳头：全收 + 不张开
+    const isFist = (extCount===0 && gesture.opennessSm<0.35);
+    if(isFist && now-gesture.lastFistFlipT > 700){
+      gesture.lastFistFlipT = now;
+      state.rotFrozen = !state.rotFrozen;
+      flashTag('g-fist');
+      setLive(true, state.rotFrozen?'✊ ROT FROZEN':'✊ ROT RESUME');
+      return;
+    }
+
+    // ✌️ Peace：仅 index+middle 伸直
+    const isPeace = (Ei && Em && !Er && !Ep);
+    if(isPeace && now-gesture.lastPresetT > 900){
+      gesture.lastPresetT = now;
+      applyPreset(presetIdx+1);
+      flashTag('g-peace');
+      setLive(true,'✌️ PRESET '+(presetIdx+1)+'/'+COLOR_PRESETS.length);
+      return;
+    }
+
+    // 👍 / 👎：拇指明显伸出 + 其它收起
+    if(extCount===0 && thumbExt && now-gesture.lastThumbT>500){
+      if(thumbUp){
+        gesture.lastThumbT = now;
+        state.size = Math.min(3, +(state.size + 0.15*sens).toFixed(2));
+        $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
+        mat.size = state.size;
+        flashTag('g-thumb-up'); setLive(true,'👍 SIZE '+state.size.toFixed(1)); return;
+      }
+      if(thumbDown){
+        gesture.lastThumbT = now;
+        state.size = Math.max(0.4, +(state.size - 0.15*sens).toFixed(2));
+        $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
+        mat.size = state.size;
+        flashTag('g-thumb-dn'); setLive(true,'👎 SIZE '+state.size.toFixed(1)); return;
+      }
+    }
+
+    // 捏合 = 点击 / 双击爆裂
+    const pinchThresh = 0.30 + (1-sens)*0.10; // 高灵敏 = 更难触发，避免误判
+    const pinching = gesture.pinchSm < pinchThresh;
+    if(pinching && !gesture.pinchActive){
+      gesture.pinchActive = true;
+      if(now-gesture.lastTapT < 420){
+        gesture.tapBurst++;
+        if(gesture.tapBurst>=1){
+          $('btn-explode').click();
+          setLive(true,'🤏🤏 EXPLODE');
+          gesture.tapBurst=0;
+        }
+      }else{
+        gesture.tapBurst=0;
+        setLive(true,'🤏 TAP');
+      }
+      gesture.lastTapT = now;
+      flashTag('g-pinch');
+    }else if(!pinching){
+      gesture.pinchActive = false;
+    }
+
+    // 水平滑动切模型（食指伸直 + 中指收起，避免与张开冲突）
+    const isPoint = (Ei && !Em && !Er && !Ep);
+    if(isPoint){
       if(gesture.prevX!=null){
-        const dx = gesture.x - gesture.prevX;
-        const now = performance.now();
-        if(Math.abs(dx)>0.18 && now-gesture.lastSwipeT>800){
+        const dx = gesture.xSm - gesture.prevX;
+        const swipeTh = 0.10 / Math.max(0.4, sens);
+        const cooldown = Math.max(380, 700/sens);
+        if(Math.abs(dx)>swipeTh && now-gesture.lastSwipeT>cooldown){
           gesture.lastSwipeT = now;
           const order = MODEL_META.map(m=>m.id);
           const i = order.indexOf(currentModel);
           const ni = (i + (dx>0?1:-1) + order.length) % order.length;
           applyModel(order[ni]);
           flashTag('g-swipe');
-          setLive(true, 'SWIPE → '+order[ni].toUpperCase());
+          setLive(true,'👉 '+order[ni].toUpperCase());
         }
       }
-      gesture.prevX = gesture.x;
+      gesture.prevX = gesture.xSm;
     }else{
       gesture.prevX = null;
     }
 
-    // 捏合 = 点击
-    const pinching = pinchDist < 0.35;
-    if(pinching && !gesture.pinchActive){
-      gesture.pinchActive = true;
-      const now = performance.now();
-      if(now-gesture.lastTapT < 600){
-        // 双击 → 爆裂
-        $('btn-explode').click();
-        setLive(true,'DOUBLE-TAP · EXPLODE');
-      }else{
-        setLive(true,'TAP');
-      }
-      gesture.lastTapT = now;
-      flashTag('g-click');
-    }else if(!pinching){
-      gesture.pinchActive = false;
-    }
+    // 张开手 → openness 控制 scale；垂直移动 → 调整旋转速度
+    if(gesture.opennessSm > 0.7){
+      const target = THREE.MathUtils.clamp(gesture.opennessSm*1.3, 0.35, 1.7);
+      // 灵敏度也提升收敛速度
+      state.scale += (target - state.scale) * Math.min(0.35, k*1.8);
+      flashTag('g-open');
 
-    if(!gesture.twoHand){
-      // openness 控制全局缩放 (0.4-1.6)
-      const target = THREE.MathUtils.clamp(openness*1.2, 0.35, 1.6);
-      state.scale += (target - state.scale)*0.12;
-      if(openness>0.8) flashTag('g-open'); else flashTag('g-pinch');
-      if(!gesture.twoHand) setLive(true, openness>0.7?'OPEN':'PINCH');
+      // 上下抬手调旋转速度
+      if(gesture.rotAdjustBase==null) gesture.rotAdjustBase = { y:gesture.ySm, rot:state.rot };
+      const dy = gesture.rotAdjustBase.y - gesture.ySm; // 向上为正
+      if(Math.abs(dy)>0.05){
+        const newRot = THREE.MathUtils.clamp(gesture.rotAdjustBase.rot + dy*2.0*sens, 0, 2);
+        if(Math.abs(newRot - state.rot) > 0.02){
+          state.rot = newRot;
+          $('rot').value = state.rot; $('v-rot').textContent = state.rot.toFixed(2);
+          flashTag('g-tilt');
+        }
+      }
+      setLive(true,'🖐 OPEN '+gesture.opennessSm.toFixed(2));
+    }else{
+      gesture.rotAdjustBase=null;
+      if(gesture.opennessSm<0.45) setLive(true,'🤏 CLOSE');
     }
   }
 
@@ -779,8 +963,10 @@
     const t  = clock.elapsedTime;
 
     // 旋转
-    points.rotation.y += dt * state.rot * 0.5;
-    points.rotation.x = Math.sin(t*0.1) * 0.06;
+    if(!state.rotFrozen){
+      points.rotation.y += dt * state.rot * 0.5;
+      points.rotation.x = Math.sin(t*0.1) * 0.06;
+    }
 
     // 粒子动画：home + 噪声 + 全局缩放 + 鼠标推力 + 爆裂衰减
     const explode = performance.now() < state.explodeUntil;
