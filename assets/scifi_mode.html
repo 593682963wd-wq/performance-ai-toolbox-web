@@ -207,6 +207,7 @@
     <div class="seg" style="display:flex;gap:6px">
       <button class="iconbtn" id="btn-back" title="返回工具台">←</button>
       <button class="iconbtn" id="btn-tools" title="手势工具圈（🧰）">🧰</button>
+      <button class="iconbtn" id="btn-cinema" title="单手电影控制：张开放大/握拳缩小/手偏转视角">🎬</button>
       <button class="iconbtn" id="btn-cam" title="开启/关闭摄像头">📷</button>
       <button class="iconbtn" id="btn-fs"  title="全屏">⛶</button>
     </div>
@@ -572,6 +573,9 @@
     rotFrozen:false,   // 拳头冻结
     handCal:4.2,       // openness 标定基准
     camTargetZ:null,   // 工具圈打开时临时拉远相机
+    cinemaMode:true,   // 🎬 单手电影模式：张开放大/握拳缩小/手偏转视角
+    camYawTarget:0, camPitchTarget:0, // 相机旋转目标（二级平滑用）
+    camZoomTarget:null, // 电影模式下 camera.z 目标
   };
 
   // 配色预设（✌️ 切换）
@@ -660,6 +664,20 @@
     else{ location.href='/'; }
   });
   $('btn-cam').addEventListener('click', ()=>toggleCamera());
+
+  // 🎬 单手电影模式（默认开，再点关）— 关闭后回到老式离散手势
+  function updateCinemaBtn(){
+    const b = $('btn-cinema');
+    if(state.cinemaMode){ b.style.color = '#f59e0b'; b.style.textShadow = '0 0 12px rgba(245,158,11,.8)'; }
+    else{ b.style.color = ''; b.style.textShadow = ''; }
+  }
+  $('btn-cinema').addEventListener('click', ()=>{
+    state.cinemaMode = !state.cinemaMode;
+    if(!state.cinemaMode){ state.camZoomTarget = null; state.camYawTarget = 0; state.camPitchTarget = 0; }
+    updateCinemaBtn();
+    setLive(true, state.cinemaMode ? '🎬 CINEMA ON' : '🎬 CINEMA OFF');
+  });
+  updateCinemaBtn();
 
   // ═══════════ 🧰 工具星座（3D 漂浮的全息工具粒子） ═══════════
   // 每个工具 = 场景中的 Sprite（canvas 贴图），围绕中心球面分布、轻微漂浮。
@@ -1193,6 +1211,44 @@
     }else{
       gesture.twoHand=false; gesture.twoDistSm=null;
     }
+
+    // 🎬 ═════ 电影模式（单手主控）═════
+    // 张开手 → 放大（camera.z 拉近）；握拳 → 缩小（拉远）；
+    // 手位置（屏幕中心为锚）→ 相机 yaw/pitch；连续平滑、无离散触发，最顺手。
+    if(state.cinemaMode){
+      // openness 已在上方算好 (opennessSm)，范围 ~0.2(拳)~1.2(全张)
+      const op = THREE.MathUtils.clamp(gesture.opennessSm, 0.20, 1.10);
+      // 映射：拳 0.20 → 720（远）；张 1.10 → 160（近）
+      const zT = THREE.MathUtils.lerp(720, 160,
+                   THREE.MathUtils.smoothstep(op, 0.25, 1.00));
+      state.camZoomTarget = zT;
+
+      // 手位置 → 相机 yaw/pitch（死区 ±0.06，灵敏度 0.8/0.55）
+      // xSm = 1-wrist.x，ySm = wrist.y，已经在 [0,1] 范围且镜像正确
+      const cx = gesture.xSm - 0.5;
+      const cy = gesture.ySm - 0.5;
+      const DZ = 0.06;
+      const axx = Math.abs(cx) < DZ ? 0 : (cx - Math.sign(cx)*DZ);
+      const ayy = Math.abs(cy) < DZ ? 0 : (cy - Math.sign(cy)*DZ);
+      state.camYawTarget   = THREE.MathUtils.clamp(axx * 0.9 * state.sensitivity, -0.55, 0.55);
+      state.camPitchTarget = THREE.MathUtils.clamp(-ayy * 0.65 * state.sensitivity, -0.45, 0.45);
+
+      // 实时反馈
+      const tag = op < 0.35 ? '✊ 缩' : op > 0.85 ? '🖐 放' : '·';
+      setLive(true, '🎬 '+tag+' Z='+zT.toFixed(0)+' yaw='+state.camYawTarget.toFixed(2));
+
+      // 仍然保留：捏合 → 爆裂（科幻电影里常见的「按一下」交互）
+      const pinchTh = 0.30 + (1-state.sensitivity)*0.10;
+      const _nowC = performance.now();
+      if(gesture.pinchSm < pinchTh && !gesture.pinchActive){
+        gesture.pinchActive = true;
+        if(_nowC-gesture.lastTapT < 420){ $('btn-explode').click(); flashTag('g-pinch'); setLive(true,'🤏🤏 EXPLODE'); }
+        gesture.lastTapT = _nowC;
+      }else if(gesture.pinchSm >= pinchTh){
+        gesture.pinchActive = false;
+      }
+      return; // 跳过下方的离散手势分支
+    }
     // 【Fingerpose】用业界成熟的 curl/direction 模型识别 5 个离散手势
     let fpTop = null, fpScore = 0;
     if(fpEstimator){
@@ -1454,6 +1510,17 @@
     // 相机拉远/复位（工具圈触发）
     if(state.camTargetZ != null){
       camera.position.z += (state.camTargetZ - camera.position.z)*0.06;
+    }
+
+    // 🎬 电影模式：手势驱动的相机 zoom + yaw/pitch（连续平滑，无离散触发）
+    if(state.cinemaMode){
+      if(state.camZoomTarget != null){
+        camera.position.z += (state.camZoomTarget - camera.position.z) * 0.08;
+      }
+      // 二级平滑相机朝向（lookAt 后再 yaw/pitch 偏移）
+      const yawNow = camera.rotation.y, pitNow = camera.rotation.x;
+      camera.rotation.y = yawNow + (state.camYawTarget - yawNow) * 0.08;
+      camera.rotation.x = pitNow + (state.camPitchTarget - pitNow) * 0.08;
     }
 
     // 工具星座更新
