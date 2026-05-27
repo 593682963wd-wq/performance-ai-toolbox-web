@@ -206,6 +206,7 @@
     </div>
     <div class="seg" style="display:flex;gap:6px">
       <button class="iconbtn" id="btn-back" title="返回工具台">←</button>
+      <button class="iconbtn" id="btn-tools" title="手势工具圈（🧰）">🧰</button>
       <button class="iconbtn" id="btn-cam" title="开启/关闭摄像头">📷</button>
       <button class="iconbtn" id="btn-fs"  title="全屏">⛶</button>
     </div>
@@ -562,6 +563,7 @@
     smooth:0.35,       // 0.08-0.9，越高越稳越大延迟
     rotFrozen:false,   // 拳头冻结
     handCal:4.2,       // openness 标定基准
+    camTargetZ:null,   // 工具圈打开时临时拉远相机
   };
 
   // 配色预设（✌️ 切换）
@@ -651,15 +653,12 @@
   });
   $('btn-cam').addEventListener('click', ()=>toggleCamera());
 
-  // ═══════════ 🧰 手势工具圈 ═══════════
-  // 状态：点 🧰 打开 → 环形浮现该全部工具 tile，鼠标/手势都能 hover+点击启动。
-  const toolsRing = document.createElement('div');
-  toolsRing.id = 'tools-ring';
-  toolsRing.style.cssText = 'display:none;position:fixed;inset:0;z-index:55;pointer-events:none';
-  document.body.appendChild(toolsRing);
+  // ═══════════ 🧰 工具星座（3D 漂浮的全息工具粒子） ═══════════
+  // 每个工具 = 场景中的 Sprite（canvas 贴图），围绕中心球面分布、轻微漂浮。
+  // 手势光标（屏幕坐标）→ raycaster 投射到 sprite → 高亮 → 捏合启动。
   const toolsToast = document.createElement('div');
   toolsToast.id = 'tools-toast';
-  toolsToast.style.cssText = 'position:fixed;left:50%;top:90px;transform:translateX(-50%);background:rgba(15,23,42,.92);border:1px solid rgba(79,195,247,.55);color:#a5e7ff;padding:10px 18px;border-radius:24px;font-size:13px;letter-spacing:1px;z-index:120;opacity:0;transition:opacity .3s;pointer-events:none';
+  toolsToast.style.cssText = 'position:fixed;left:50%;top:90px;transform:translateX(-50%);background:rgba(15,23,42,.92);border:1px solid rgba(79,195,247,.55);color:#a5e7ff;padding:10px 20px;border-radius:24px;font-size:13px;letter-spacing:1px;z-index:120;opacity:0;transition:opacity .3s;pointer-events:none;text-shadow:0 0 8px rgba(79,195,247,.5)';
   document.body.appendChild(toolsToast);
   function toolToast(msg, ok=true){
     toolsToast.textContent = msg;
@@ -667,164 +666,278 @@
     toolsToast.style.color = ok?'#a5e7ff':'#ffb4d8';
     toolsToast.style.opacity = '1';
     clearTimeout(toolToast._t);
-    toolToast._t = setTimeout(()=>toolsToast.style.opacity='0', 2200);
+    toolToast._t = setTimeout(()=>toolsToast.style.opacity='0', 2400);
   }
-  // 全局 CSS
-  const ringStyle = document.createElement('style');
-  ringStyle.textContent = `
-    #tools-ring.on{display:block !important}
-    .tool-tile{position:absolute;pointer-events:auto;cursor:pointer;
-      width:170px;padding:14px 16px;border-radius:14px;
-      background:linear-gradient(160deg,rgba(15,23,42,.78),rgba(30,41,59,.78));
-      border:1px solid rgba(79,195,247,.4);color:#cfe8ff;
-      backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-      box-shadow:0 12px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(79,195,247,.15) inset;
-      transition:transform .25s, box-shadow .25s, border-color .25s, opacity .4s;
-      transform-origin:center;opacity:0;animation:tile-in .5s forwards;
-      will-change:transform}
-    .tool-tile:hover, .tool-tile.gp-hover{
-      transform:scale(1.08);
-      border-color:rgba(79,195,247,.95);
-      box-shadow:0 18px 60px rgba(79,195,247,.45), 0 0 0 1px rgba(79,195,247,.6) inset}
-    .tool-tile .tt-name{font-size:14px;font-weight:600;color:#fff;margin-bottom:4px;
-      text-shadow:0 0 12px rgba(79,195,247,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .tool-tile .tt-cat{font-size:10px;color:#7aa3c7;letter-spacing:1px;text-transform:uppercase}
-    .tool-tile .tt-sum{font-size:11px;color:#9bb8d6;margin-top:6px;line-height:1.4;
-      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .tool-tile .tt-st{position:absolute;top:8px;right:10px;font-size:10px;padding:2px 7px;border-radius:8px;
-      background:rgba(34,197,94,.18);color:#22c55e;border:1px solid rgba(34,197,94,.4)}
-    .tool-tile .tt-st.off{background:rgba(148,163,184,.12);color:#94a3b8;border-color:rgba(148,163,184,.35)}
-    .tool-tile .tt-st.lock{background:rgba(245,158,11,.15);color:#fbbf24;border-color:rgba(245,158,11,.5)}
-    @keyframes tile-in{from{opacity:0;transform:scale(.5) rotate(-8deg)}to{opacity:.96;transform:scale(1) rotate(0)}}
-    #tools-ring .ring-close{position:absolute;top:80px;right:24px;
-      pointer-events:auto;background:rgba(15,23,42,.85);border:1px solid rgba(244,114,182,.6);
-      color:#ffb4d8;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:18px}
-    /* 手势光标（在全屏科幻背景上也可用） */
+
+  // 手势光标（屏幕 reticle）
+  const cursorStyle = document.createElement('style');
+  cursorStyle.textContent = `
     #scifi-cursor{position:fixed;left:0;top:0;width:64px;height:64px;margin:-32px 0 0 -32px;
-      pointer-events:none;z-index:200;display:none;transition:transform .05s linear}
+      pointer-events:none;z-index:200;display:none}
     #scifi-cursor.on{display:block}
     #scifi-cursor .ring{position:absolute;inset:0;border:2px solid rgba(79,195,247,.85);
       border-radius:50%;box-shadow:0 0 24px rgba(79,195,247,.7),inset 0 0 12px rgba(79,195,247,.5);
       transition:all .12s}
-    #scifi-cursor .dot{position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px;
+    #scifi-cursor .dot{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px;
       background:#fff;border-radius:50%;box-shadow:0 0 10px #fff}
     #scifi-cursor.pinch .ring{border-color:#22c55e;
       box-shadow:0 0 30px rgba(34,197,94,.9),inset 0 0 14px rgba(34,197,94,.7);transform:scale(.72)}
+    #scifi-cursor.hover .ring{border-color:#fff;
+      box-shadow:0 0 36px rgba(255,255,255,.9),inset 0 0 16px rgba(79,195,247,.6);transform:scale(1.18)}
   `;
-  document.head.appendChild(ringStyle);
-
-  // 手势光标元素（为工具圈服务，也会点击 tile）
+  document.head.appendChild(cursorStyle);
   const scifiCursor = document.createElement('div');
   scifiCursor.id = 'scifi-cursor';
   scifiCursor.innerHTML = '<div class="ring"></div><div class="dot"></div>';
   document.body.appendChild(scifiCursor);
-  const _gp = { hover:null, x:innerWidth/2, y:innerHeight/2, lastClickT:0, pinchActive:false };
-  function gpMove(nx, ny){
-    _gp.x += (nx - _gp.x) * 0.5; _gp.y += (ny - _gp.y) * 0.5;
-    scifiCursor.style.transform = `translate(${_gp.x}px, ${_gp.y}px)`;
-    if(toolsRing.classList.contains('on')){
-      scifiCursor.style.display='none';
-      const el = document.elementFromPoint(_gp.x, _gp.y);
-      scifiCursor.style.display='block';
-      const tile = el && el.closest && el.closest('.tool-tile, .ring-close');
-      if(tile !== _gp.hover){
-        if(_gp.hover) _gp.hover.classList.remove('gp-hover');
-        _gp.hover = tile;
-        if(tile) tile.classList.add('gp-hover');
-      }
-    }
-  }
-  function gpPinch(on){
-    if(on && !_gp.pinchActive){
-      _gp.pinchActive = true;
-      scifiCursor.classList.add('pinch');
-      const now = performance.now();
-      if(_gp.hover && now-_gp.lastClickT>320){
-        _gp.lastClickT = now;
-        _gp.hover.click();
-      }
-    }else if(!on){
-      _gp.pinchActive = false;
-      scifiCursor.classList.remove('pinch');
-    }
-  }
-  // 暴露给手势主回调调用
-  window.__scifiGP = { move:gpMove, pinch:gpPinch, cursor:scifiCursor };
 
+  const toolsState = {
+    on:false, loaded:false, list:[], sprites:[],
+    group:new THREE.Group(), hover:null,
+    targetAlpha:0, alpha:0,
+    cursor:{ x:innerWidth/2, y:innerHeight/2, ndcX:0, ndcY:0, pinchActive:false, lastClickT:0 },
+  };
+  toolsState.group.visible = false;
+  scene.add(toolsState.group);
+
+  function wrapText(g,text,x,y,maxW,lh,maxLines){
+    const chars = Array.from(text);
+    let line='', n=0;
+    for(let i=0;i<chars.length;i++){
+      const test = line + chars[i];
+      if(g.measureText(test).width > maxW){
+        g.fillText(line, x, y); line = chars[i]; y += lh; n++;
+        if(n>=maxLines-1){
+          let rest = chars.slice(i).join('');
+          while(g.measureText(rest+'…').width > maxW && rest.length>0) rest = rest.slice(0,-1);
+          g.fillText(rest+'…', x, y);
+          return;
+        }
+      } else { line = test; }
+    }
+    if(line) g.fillText(line, x, y);
+  }
+  function drawToolCard(t){
+    const W=512, H=256;
+    const c = document.createElement('canvas'); c.width=W; c.height=H;
+    const g = c.getContext('2d');
+    const stColor = t.status==='running' ? '#22c55e'
+      : (t.access==='self' ? '#fbbf24' : '#4fc3f7');
+    const bg = g.createRadialGradient(W/2,H/2,40, W/2,H/2,W*0.6);
+    bg.addColorStop(0,'rgba(15,23,42,.92)');
+    bg.addColorStop(1,'rgba(8,14,28,.78)');
+    g.fillStyle=bg;
+    g.beginPath();
+    const r=28;
+    g.moveTo(r,0); g.lineTo(W-r,0); g.quadraticCurveTo(W,0,W,r);
+    g.lineTo(W,H-r); g.quadraticCurveTo(W,H,W-r,H);
+    g.lineTo(r,H); g.quadraticCurveTo(0,H,0,H-r);
+    g.lineTo(0,r); g.quadraticCurveTo(0,0,r,0); g.closePath();
+    g.fill();
+    g.strokeStyle = stColor; g.lineWidth = 3; g.shadowColor = stColor; g.shadowBlur = 30;
+    g.stroke(); g.shadowBlur = 0;
+    g.strokeStyle = 'rgba(79,195,247,.25)'; g.lineWidth = 1; g.stroke();
+    const stTxt = t.status==='running' ? '● LIVE'
+      : (t.access==='self' ? '🔒 SELF' : '○ READY');
+    g.font='600 22px -apple-system,system-ui,sans-serif';
+    g.fillStyle=stColor; g.textAlign='right';
+    g.fillText(stTxt, W-28, 40);
+    g.font='500 18px -apple-system,sans-serif';
+    g.fillStyle='#7aa3c7'; g.textAlign='left';
+    g.fillText((t.category||'').toUpperCase().slice(0,20), 28, 40);
+    g.font='700 38px -apple-system,system-ui,sans-serif';
+    g.fillStyle='#fff';
+    g.shadowColor='rgba(79,195,247,.7)'; g.shadowBlur=14;
+    const name = (t.name||t.id);
+    const nameFit = name.length>14 ? name.slice(0,13)+'…' : name;
+    g.fillText(nameFit, 28, 100);
+    g.shadowBlur=0;
+    g.font='400 18px -apple-system,sans-serif';
+    g.fillStyle='#9bb8d6';
+    wrapText(g, (t.summary||'').replace(/\s+/g,' '), 28, 140, W-56, 24, 4);
+    g.font='500 14px -apple-system,sans-serif';
+    g.fillStyle='rgba(79,195,247,.7)';
+    g.fillText('▸ 捏合启动 · 点击启动', 28, H-22);
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 4;
+    return tex;
+  }
+  function homeFor(i, N){
+    const phi = Math.acos(1 - 2*(i+0.5)/N);
+    const theta = Math.PI*(1+Math.sqrt(5))*i;
+    const R = 260;
+    return new THREE.Vector3(
+      R*Math.sin(phi)*Math.cos(theta),
+      R*Math.sin(phi)*Math.sin(theta)*0.7,
+      R*Math.cos(phi)
+    );
+  }
   async function fetchTools(){
     try{
       const r = await fetch('/api/tools'); if(!r.ok) throw new Error('HTTP '+r.status);
       const j = await r.json(); return j.tools || [];
     }catch(e){ toolToast('工具列表获取失败：'+e.message, false); return []; }
   }
-  function placeTiles(tools){
-    toolsRing.innerHTML = '';
-    const cx = innerWidth/2, cy = innerHeight/2;
-    const rX = Math.min(innerWidth*0.36, 520);
-    const rY = Math.min(innerHeight*0.36, 360);
+  function buildToolSprites(tools){
+    toolsState.list = tools;
+    toolsState.sprites.forEach(s=>{
+      toolsState.group.remove(s);
+      if(s.material.map) s.material.map.dispose();
+      s.material.dispose();
+    });
+    toolsState.sprites = [];
     const N = tools.length;
     tools.forEach((t,i)=>{
-      const ang = -Math.PI/2 + (i/N)*Math.PI*2;
-      const x = cx + Math.cos(ang)*rX - 85;
-      const y = cy + Math.sin(ang)*rY - 50;
-      const tile = document.createElement('div');
-      tile.className = 'tool-tile';
-      tile.style.left = x+'px';
-      tile.style.top  = y+'px';
-      tile.style.animationDelay = (i*40)+'ms';
-      const stCls = t.status==='running'?'':(t.access==='self'?'lock':'off');
-      const stTxt = t.status==='running'?'• LIVE':(t.access==='self'?'🔒 SELF':'OFFLINE');
-      tile.innerHTML = `
-        <div class="tt-st ${stCls}">${stTxt}</div>
-        <div class="tt-cat">${(t.category||'').slice(0,18)}</div>
-        <div class="tt-name">${t.name||t.id}</div>
-        <div class="tt-sum">${(t.summary||'').slice(0,48)}</div>`;
-      tile.addEventListener('click', ()=>launchTool(t));
-      toolsRing.appendChild(tile);
+      const tex = drawToolCard(t);
+      const mat = new THREE.SpriteMaterial({
+        map: tex, transparent:true, opacity:0,
+        depthWrite:false, depthTest:false,
+      });
+      const sp = new THREE.Sprite(mat);
+      const home = homeFor(i, N);
+      sp.position.copy(home);
+      sp.scale.set(80, 40, 1);
+      sp.userData = {
+        tool:t, home:home,
+        phase:Math.random()*Math.PI*2,
+        baseScale:80, hoverK:0, launchedAt:0,
+      };
+      toolsState.group.add(sp);
+      toolsState.sprites.push(sp);
     });
-    const cls = document.createElement('button');
-    cls.className = 'ring-close';
-    cls.textContent = '×';
-    cls.title = '关闭工具圈';
-    cls.addEventListener('click', ()=>toggleToolsRing(false));
-    toolsRing.appendChild(cls);
   }
   async function launchTool(t){
-    toolToast('🚀 启动 '+t.name+' …');
+    toolToast('🚀 召唤 '+(t.name||t.id)+' …');
     try{
       const r = await fetch('/api/tools/'+t.id+'/launch', {method:'POST'});
       const j = await r.json();
       if(j.blocked){ toolToast(j.message||'🔒 已拦截', false); return; }
       if(!j.ok){ toolToast(j.message||'启动失败', false); return; }
       const url = (j.tool && j.tool.url) || t.url;
-      if(url) setTimeout(()=>window.open(url,'_blank','noopener'), 600);
-      toolToast('✅ '+t.name+' 运行中');
+      if(url) setTimeout(()=>window.open(url,'_blank','noopener'), 500);
+      toolToast('✅ '+(t.name||t.id)+' · 运行中');
+      const idx = toolsState.list.findIndex(x=>x.id===t.id);
+      if(idx>=0){
+        const updated = Object.assign({}, t, { status:'running' });
+        toolsState.list[idx] = updated;
+        const sp = toolsState.sprites[idx];
+        if(sp.material.map) sp.material.map.dispose();
+        sp.material.map = drawToolCard(updated);
+        sp.material.needsUpdate = true;
+        sp.userData.tool = updated;
+        sp.userData.launchedAt = performance.now();
+      }
     }catch(e){ toolToast('请求失败：'+e.message, false); }
   }
-  let toolsLoaded = false;
-  async function toggleToolsRing(force){
-    const want = (typeof force==='boolean') ? force : !toolsRing.classList.contains('on');
+  async function toggleTools(force){
+    const want = (typeof force==='boolean') ? force : !toolsState.on;
     if(want){
-      if(!toolsLoaded){
-        toolToast('🧰 加载工具圈 …');
+      if(!toolsState.loaded){
+        toolToast('🧰 加载工具星座 …');
         const tools = await fetchTools();
-        if(!tools.length){ return; }
-        placeTiles(tools);
-        toolsLoaded = true;
+        if(!tools.length) return;
+        buildToolSprites(tools);
+        toolsState.loaded = true;
       }
-      toolsRing.classList.add('on');
+      toolsState.on = true;
+      toolsState.group.visible = true;
+      toolsState.targetAlpha = 1;
       scifiCursor.classList.add('on');
       $('btn-tools').style.color = '#22c55e';
-      toolToast('🧰 手势指挥 · 点括号或用手指捏启动');
+      $('btn-tools').style.textShadow = '0 0 12px rgba(34,197,94,.8)';
+      toolToast('🧰 用手势指向工具 · 捏合启动 · 再点 🧰 收回');
+      state.camTargetZ = 540;
     }else{
-      toolsRing.classList.remove('on');
-      scifiCursor.classList.remove('on');
+      toolsState.on = false;
+      toolsState.targetAlpha = 0;
+      scifiCursor.classList.remove('on','hover','pinch');
       $('btn-tools').style.color = '';
+      $('btn-tools').style.textShadow = '';
+      if(toolsState.hover){ toolsState.hover.userData.hoverK = 0; toolsState.hover = null; }
+      state.camTargetZ = null;
     }
   }
-  $('btn-tools').addEventListener('click', ()=>toggleToolsRing());
-  window.addEventListener('resize', ()=>{ if(toolsLoaded){ fetchTools().then(placeTiles); } });
+  $('btn-tools').addEventListener('click', ()=>toggleTools());
 
+  const _raycaster = new THREE.Raycaster();
+  function updateCursorScreen(px, py){
+    toolsState.cursor.x = px; toolsState.cursor.y = py;
+    toolsState.cursor.ndcX = (px/innerWidth)*2 - 1;
+    toolsState.cursor.ndcY = -(py/innerHeight)*2 + 1;
+    scifiCursor.style.transform = `translate(${px}px, ${py}px)`;
+  }
+  window.addEventListener('mousemove', e=>{
+    if(toolsState.on) updateCursorScreen(e.clientX, e.clientY);
+  });
+  window.addEventListener('click', e=>{
+    if(toolsState.on && toolsState.hover) launchTool(toolsState.hover.userData.tool);
+  });
+  function gpMove(nx, ny){
+    if(!toolsState.on) return;
+    const px = toolsState.cursor.x + (nx - toolsState.cursor.x)*0.5;
+    const py = toolsState.cursor.y + (ny - toolsState.cursor.y)*0.5;
+    updateCursorScreen(px, py);
+  }
+  function gpPinch(on){
+    if(!toolsState.on) return;
+    if(on && !toolsState.cursor.pinchActive){
+      toolsState.cursor.pinchActive = true;
+      scifiCursor.classList.add('pinch');
+      const now = performance.now();
+      if(toolsState.hover && now - toolsState.cursor.lastClickT > 380){
+        toolsState.cursor.lastClickT = now;
+        launchTool(toolsState.hover.userData.tool);
+      }
+    }else if(!on){
+      toolsState.cursor.pinchActive = false;
+      scifiCursor.classList.remove('pinch');
+    }
+  }
+  window.__scifiGP = { move:gpMove, pinch:gpPinch, cursor:scifiCursor, state:toolsState };
+
+  function tickTools(t, dt){
+    toolsState.alpha += (toolsState.targetAlpha - toolsState.alpha)*0.06;
+    if(toolsState.alpha < 0.01 && toolsState.targetAlpha < 0.01){
+      toolsState.group.visible = false;
+      return;
+    }
+    toolsState.group.visible = true;
+    toolsState.group.rotation.y += dt * 0.08;
+
+    let hover = null;
+    if(toolsState.on && toolsState.sprites.length){
+      _raycaster.setFromCamera({x:toolsState.cursor.ndcX, y:toolsState.cursor.ndcY}, camera);
+      const hits = _raycaster.intersectObjects(toolsState.sprites, false);
+      if(hits.length) hover = hits[0].object;
+    }
+    if(hover !== toolsState.hover){
+      toolsState.hover = hover;
+      if(hover){
+        scifiCursor.classList.add('hover');
+        toolsState.sprites.forEach(s=>s.renderOrder = 0);
+        hover.renderOrder = 5;
+      } else {
+        scifiCursor.classList.remove('hover');
+      }
+    }
+    for(const sp of toolsState.sprites){
+      const u = sp.userData;
+      const fx = Math.sin(t*0.6 + u.phase)*8;
+      const fy = Math.cos(t*0.5 + u.phase*1.3)*6;
+      const fz = Math.sin(t*0.4 + u.phase*0.7)*8;
+      sp.position.set(u.home.x+fx, u.home.y+fy, u.home.z+fz);
+      const targetHover = (sp === toolsState.hover) ? 1 : 0;
+      u.hoverK += (targetHover - u.hoverK)*0.18;
+      const scl = u.baseScale * (1 + u.hoverK*0.45);
+      sp.scale.set(scl, scl*0.5, 1);
+      let extra = 0;
+      if(u.launchedAt){
+        const age = (performance.now()-u.launchedAt)/600;
+        if(age < 1) extra = (1-age)*0.4; else u.launchedAt = 0;
+      }
+      sp.material.opacity = Math.min(1, toolsState.alpha*(0.85 + u.hoverK*0.15 + extra));
+    }
+  }
   // ═══════════ 5. 鼠标交互 ═══════════
   const mouse = new THREE.Vector3(9999,9999,0);
   window.addEventListener('mousemove', e=>{
@@ -975,8 +1088,8 @@
     gesture.ySm += (rawY - gesture.ySm) * k;
     gesture.active = true;
 
-    // 🧰 工具圈开启时 → 食指尖驱动屏幕光标 + 捏合点击
-    if(window.__scifiGP && document.getElementById('tools-ring').classList.contains('on')){
+    // 🧰 工具星座开启时 → 食指尖驱动屏幕光标 + 捏合启动
+    if(window.__scifiGP && window.__scifiGP.state && window.__scifiGP.state.on){
       const ix = (1 - idxTip.x) * innerWidth;
       const iy = idxTip.y * innerHeight;
       window.__scifiGP.move(ix, iy);
@@ -1192,6 +1305,14 @@
       pos[iz] += vel[iz]*dt*8;
     }
     geom.attributes.position.needsUpdate = true;
+
+    // 相机拉远/复位（工具圈触发）
+    if(state.camTargetZ != null){
+      camera.position.z += (state.camTargetZ - camera.position.z)*0.06;
+    }
+
+    // 工具星座更新
+    tickTools(t, dt);
 
     composer.render();
 
