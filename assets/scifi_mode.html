@@ -231,7 +231,15 @@
       <input type="color" id="color1" value="#4fc3f7">
       <label>辅色 <span class="val" id="v-color2">#bf6bff</span></label>
       <input type="color" id="color2" value="#bf6bff">
-      <label>粒径 <span class="val" id="v-size">1.4</span></label>
+      <label>粒子形状</label>
+      <select id="pshape" style="width:100%;background:#0a1628;color:#cfe8ff;border:1px solid rgba(79,195,247,.35);border-radius:6px;padding:6px;font-family:inherit">
+        <option value="circle">● 圆点（默认）</option>
+        <option value="star">★ 星形</option>
+        <option value="ring">◯ 光环</option>
+        <option value="diamond">◆ 菱形</option>
+        <option value="cross">＋ 十字</option>
+      </select>
+      <label style="margin-top:8px">粒径 <span class="val" id="v-size">1.4</span></label>
       <input type="range" id="size" min="0.4" max="3" step="0.1" value="1.4">
       <label>亮度 <span class="val" id="v-glow">0.30</span></label>
       <input type="range" id="glow" min="0.0" max="2.2" step="0.05" value="0.30">
@@ -280,17 +288,16 @@
     </div>
   </div>
 
-  <!-- 手势提示 -->
+  <!-- 手势提示（🎬 电影模式 vs 普通模式） -->
   <div id="gesture-hud">
-    <span class="gtag" id="g-open">🖐 张开 · 扩散</span>
-    <span class="gtag" id="g-pinch">🤏 捏合 · 闪击</span>
-    <span class="gtag" id="g-swipe">👉 滑动 · 切模型</span>
+    <span class="gtag" id="g-open">🖐 张开 · 缩放(电影)/扩散(普通)</span>
+    <span class="gtag" id="g-pinch">🤏 捏拖 · 旋转(电影)/闪击(普通)</span>
+    <span class="gtag" id="g-peace">✌️ 耶 · 打开光标命中工具</span>
     <span class="gtag" id="g-zoom">✋✋ 双手 · 推拉</span>
-    <span class="gtag" id="g-fist">✊ 拳头 · 冻结</span>
-    <span class="gtag" id="g-peace">✌️ Peace · 配色</span>
+    <span class="gtag" id="g-fist">✊ 拳头 · 冻结自转</span>
     <span class="gtag" id="g-thumb-up">👍 加大粒子</span>
     <span class="gtag" id="g-thumb-dn">👎 缩小粒子</span>
-    <span class="gtag" id="g-tilt">↕ 抬手 · 调旋转</span>
+    <span class="gtag" id="g-swipe">👉 滑动 · 切模型</span>
   </div>
 
   <!-- 手势速查浮层 -->
@@ -371,19 +378,64 @@
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 0.30, 0.55, 0.05);
   composer.addPass(bloom);
 
-  // ═══════════ 2. 粒子贴图（圆形软晕）═══════════
-  function makeSprite(){
-    const s=128, c=document.createElement('canvas'); c.width=c.height=s;
-    const g=c.getContext('2d');
+  // ═══════════ 2. 粒子贴图（5 种形状，参考 Gemini 粒子风格）═══════════
+  function makeCircle(g,s){
     const grad=g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
     grad.addColorStop(0,'rgba(255,255,255,1)');
     grad.addColorStop(.25,'rgba(255,255,255,.85)');
     grad.addColorStop(.55,'rgba(255,255,255,.25)');
     grad.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=grad; g.fillRect(0,0,s,s);
+  }
+  function makeStar(g,s){
+    g.translate(s/2,s/2); g.fillStyle='rgba(255,255,255,.95)';
+    g.beginPath();
+    for(let i=0;i<10;i++){
+      const a=Math.PI/5*i - Math.PI/2;
+      const r=(i%2===0)? s*0.45 : s*0.18;
+      g.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+    }
+    g.closePath(); g.fill();
+    g.shadowBlur=20; g.shadowColor='rgba(255,255,255,.8)'; g.fill();
+  }
+  function makeRing(g,s){
+    g.translate(s/2,s/2);
+    const grad=g.createRadialGradient(0,0,s*0.25,0,0,s*0.5);
+    grad.addColorStop(0,'rgba(255,255,255,0)');
+    grad.addColorStop(.4,'rgba(255,255,255,.95)');
+    grad.addColorStop(.65,'rgba(255,255,255,.55)');
+    grad.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=grad; g.beginPath(); g.arc(0,0,s*0.5,0,Math.PI*2); g.fill();
+  }
+  function makeDiamond(g,s){
+    g.translate(s/2,s/2); g.rotate(Math.PI/4);
+    const grad=g.createLinearGradient(-s/2,0,s/2,0);
+    grad.addColorStop(0,'rgba(255,255,255,.2)');
+    grad.addColorStop(.5,'rgba(255,255,255,1)');
+    grad.addColorStop(1,'rgba(255,255,255,.2)');
+    g.fillStyle=grad; g.fillRect(-s*0.4,-s*0.4,s*0.8,s*0.8);
+  }
+  function makeCross(g,s){
+    g.translate(s/2,s/2);
+    g.strokeStyle='rgba(255,255,255,.95)'; g.lineWidth=s*0.12; g.lineCap='round';
+    g.shadowBlur=15; g.shadowColor='rgba(255,255,255,.9)';
+    g.beginPath(); g.moveTo(-s*0.4,0); g.lineTo(s*0.4,0); g.stroke();
+    g.beginPath(); g.moveTo(0,-s*0.4); g.lineTo(0,s*0.4); g.stroke();
+  }
+  function makeSprite(shape){
+    const s=128, c=document.createElement('canvas'); c.width=c.height=s;
+    const g=c.getContext('2d'); g.clearRect(0,0,s,s);
+    if(shape==='star') makeStar(g,s);
+    else if(shape==='ring') makeRing(g,s);
+    else if(shape==='diamond') makeDiamond(g,s);
+    else if(shape==='cross') makeCross(g,s);
+    else makeCircle(g,s);
     return new THREE.CanvasTexture(c);
   }
-  const sprite = makeSprite();
+  const SHAPES = ['circle','star','ring','diamond','cross'];
+  const SPRITE_CACHE = {};
+  for(const sh of SHAPES) SPRITE_CACHE[sh] = makeSprite(sh);
+  const sprite = SPRITE_CACHE.circle;
 
   // ═══════════ 3. 模型生成器 ═══════════
   const PARTICLE_COUNT = 60000;
@@ -612,6 +664,10 @@
   });
   $('size').addEventListener('input', e=>{ state.size=+e.target.value;
     $('v-size').textContent=state.size.toFixed(1); mat.size=state.size; });
+  $('pshape').addEventListener('change', e=>{
+    const sh = e.target.value;
+    if(SPRITE_CACHE[sh]){ mat.map = SPRITE_CACHE[sh]; mat.needsUpdate = true; }
+  });
   $('glow').addEventListener('input', e=>{ state.glow=+e.target.value;
     $('v-glow').textContent=state.glow.toFixed(2); bloom.strength=state.glow; });
   $('rot').addEventListener('input', e=>{ state.rot=+e.target.value;
@@ -938,6 +994,8 @@
   }
   function gpPinch(on){
     if(!toolsState.on) return;
+    // 电影模式下：捏合 = 旋转场景，不要触发打开工具（避免冲突；用 ✌️ 耶手势打开）
+    if(state.cinemaMode) return;
     if(on && !toolsState.cursor.pinchActive){
       toolsState.cursor.pinchActive = true;
       scifiCursor.classList.add('pinch');
@@ -1227,9 +1285,38 @@
       const pointMode = Ei2 && !Em2 && !Er2 && !Ep2;
       const palmOpen  = gesture.opennessSm > 0.65 && !pointMode;
 
+      // ── ✌️ 耶 → 打开光标命中的工具（不与捏合冲突） ──
+      let isVictoryNow = (Ei2 && Em2 && !Er2 && !Ep2);
+      if(fpEstimator){
+        try{
+          const lmArr = h.map(p=>[p.x, p.y, p.z||0]);
+          const rv = fpEstimator.estimate(lmArr, 8.0);
+          if(rv.gestures.length){
+            rv.gestures.sort((a,b)=>b.score-a.score);
+            if(rv.gestures[0].name === 'victory' && rv.gestures[0].score >= 8.5) isVictoryNow = true;
+          }
+        }catch(e){}
+      }
+      if(isVictoryNow){
+        const nowV = performance.now();
+        if(toolsState.on && toolsState.hover && nowV - (gesture.lastVictoryT||0) > 900){
+          gesture.lastVictoryT = nowV;
+          launchTool(toolsState.hover.userData.tool);
+          flashTag('g-peace');
+          setLive(true,'✌️ 打开 '+toolsState.hover.userData.tool.name);
+          return;
+        } else if(!toolsState.on){
+          flashTag('g-peace');
+          setLive(true,'✌️ 先点 🧰 显示工具');
+        } else if(!toolsState.hover){
+          flashTag('g-peace');
+          setLive(true,'✌️ 先用食指对准工具');
+        }
+      }
+
       // ── 🤏 捏合拖动 → 旋转场景（Gemini 风格：捏住=抓握，拖到哪转到哪） ──
       const pinchTh = 0.22;
-      const isPinchingNow = gesture.pinchSm < pinchTh;
+      const isPinchingNow = !isVictoryNow && gesture.pinchSm < pinchTh;
       if(isPinchingNow){
         if(!gesture.dragActive){
           gesture.dragActive = true;
