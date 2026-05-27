@@ -328,7 +328,8 @@
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "fingerpose": "https://esm.sh/fingerpose@0.1.0"
     }
   }
   </script>
@@ -338,6 +339,10 @@
   import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
   import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
   import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  // 【Fingerpose】业界事实标准的 MediaPipe 手势识别库（负载失败会降级到原启发式检测）
+  let fp = null;
+  try { fp = await import('fingerpose'); }
+  catch(e){ console.warn('[scifi] fingerpose load failed, using legacy heuristics', e); }
 
   const $ = id => document.getElementById(id);
   const setStep = t => { const s=$('step'); if(s) s.textContent = t; };
@@ -1048,6 +1053,44 @@
     }catch(e){ showErr('摄像头开启失败：' + e.message); camWrap.classList.add('min'); }
   }
 
+  // 【Fingerpose】构造 5 个核心手势的估计器（拳头/开掌/食指/Peace/Thumbs Up）
+  let fpEstimator = null;
+  if(fp){
+    const fist = new fp.GestureDescription('fist');
+    for(const fg of [fp.Finger.Index, fp.Finger.Middle, fp.Finger.Ring, fp.Finger.Pinky]){
+      fist.addCurl(fg, fp.FingerCurl.FullCurl, 1.0);
+      fist.addCurl(fg, fp.FingerCurl.HalfCurl, 0.7);
+    }
+    fist.addCurl(fp.Finger.Thumb, fp.FingerCurl.HalfCurl, 1.0);
+    fist.addCurl(fp.Finger.Thumb, fp.FingerCurl.FullCurl, 0.9);
+
+    const palm = new fp.GestureDescription('open_palm');
+    for(const fg of [fp.Finger.Index, fp.Finger.Middle, fp.Finger.Ring, fp.Finger.Pinky]){
+      palm.addCurl(fg, fp.FingerCurl.NoCurl, 1.0);
+      palm.addDirection(fg, fp.FingerDirection.VerticalUp, 1.0);
+      palm.addDirection(fg, fp.FingerDirection.DiagonalUpLeft, 0.8);
+      palm.addDirection(fg, fp.FingerDirection.DiagonalUpRight, 0.8);
+    }
+    palm.addCurl(fp.Finger.Thumb, fp.FingerCurl.NoCurl, 0.8);
+    palm.addCurl(fp.Finger.Thumb, fp.FingerCurl.HalfCurl, 0.7);
+
+    const point = new fp.GestureDescription('point');
+    point.addCurl(fp.Finger.Index, fp.FingerCurl.NoCurl, 1.0);
+    point.addDirection(fp.Finger.Index, fp.FingerDirection.VerticalUp, 1.0);
+    point.addDirection(fp.Finger.Index, fp.FingerDirection.DiagonalUpLeft, 0.8);
+    point.addDirection(fp.Finger.Index, fp.FingerDirection.DiagonalUpRight, 0.8);
+    for(const fg of [fp.Finger.Middle, fp.Finger.Ring, fp.Finger.Pinky]){
+      point.addCurl(fg, fp.FingerCurl.FullCurl, 1.0);
+      point.addCurl(fg, fp.FingerCurl.HalfCurl, 0.8);
+    }
+
+    fpEstimator = new fp.GestureEstimator([
+      fist, palm, point,
+      fp.Gestures.ThumbsUpGesture,
+      fp.Gestures.VictoryGesture,
+    ]);
+  }
+
   function startHands(){
     if(hands) return;
     hands = new window.Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands/'+f});
@@ -1145,9 +1188,22 @@
     }else{
       gesture.twoHand=false; gesture.twoDistSm=null;
     }
+    // 【Fingerpose】用业界成熟的 curl/direction 模型识别 5 个离散手势
+    let fpTop = null, fpScore = 0;
+    if(fp){
+      try{
+        const lmArr = h.map(p => [p.x, p.y, p.z||0]);
+        const r = fpEstimator.estimate(lmArr, 7.5);
+        if(r.gestures.length){
+          r.gestures.sort((a,b)=>b.score-a.score);
+          fpTop = r.gestures[0].name;
+          fpScore = r.gestures[0].score;
+        }
+      }catch(e){ /* 静默降级 */ }
+    }
 
     // ────────── 单手手势识别 ──────────
-    // 各手指是否伸直（用 tip 与 PIP 关节相对 wrist 距离比较）
+    // 各手指是否伸直（用 tip 与 PIP 关节相对 wrist 距离比较），作为模拟信号保留
     function ext(tip, pip){
       return Math.hypot(h[tip].x-wrist.x, h[tip].y-wrist.y) >
              Math.hypot(h[pip].x-wrist.x, h[pip].y-wrist.y) * 1.04;
@@ -1163,8 +1219,9 @@
     const extCount  = Ei+Em+Er+Ep;
     const now = performance.now();
 
-    // ✊ 拳头：全收 + 不张开
-    const isFist = (extCount===0 && gesture.opennessSm<0.35);
+    // ✊ 拳头：fingerpose 主判 + extCount===0 傅助
+    const isFist = (fpTop === 'fist' && fpScore >= 8.5) ||
+                   (!fp && extCount===0 && gesture.opennessSm<0.35);
     if(isFist && now-gesture.lastFistFlipT > 700){
       gesture.lastFistFlipT = now;
       state.rotFrozen = !state.rotFrozen;
@@ -1173,8 +1230,9 @@
       return;
     }
 
-    // ✌️ Peace：仅 index+middle 伸直
-    const isPeace = (Ei && Em && !Er && !Ep);
+    // ✌️ Peace：fingerpose 内置 victory 手势
+    const isPeace = (fpTop === 'victory' && fpScore >= 8.5) ||
+                    (!fp && Ei && Em && !Er && !Ep);
     if(isPeace && now-gesture.lastPresetT > 900){
       gesture.lastPresetT = now;
       applyPreset(presetIdx+1);
@@ -1183,22 +1241,23 @@
       return;
     }
 
-    // 👍 / 👎：拇指明显伸出 + 其它收起
-    if(extCount===0 && thumbExt && now-gesture.lastThumbT>500){
-      if(thumbUp){
-        gesture.lastThumbT = now;
-        state.size = Math.min(3, +(state.size + 0.15*sens).toFixed(2));
-        $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
-        mat.size = state.size;
-        flashTag('g-thumb-up'); setLive(true,'👍 SIZE '+state.size.toFixed(1)); return;
-      }
-      if(thumbDown){
-        gesture.lastThumbT = now;
-        state.size = Math.max(0.4, +(state.size - 0.15*sens).toFixed(2));
-        $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
-        mat.size = state.size;
-        flashTag('g-thumb-dn'); setLive(true,'👎 SIZE '+state.size.toFixed(1)); return;
-      }
+    // 👍 / 👎：fingerpose 内置 thumbs_up；thumbs_down 用启发式补充
+    const isThumbsUp = (fpTop === 'thumbs_up' && fpScore >= 8.5) ||
+                       (!fp && extCount===0 && thumbExt && thumbUp);
+    const isThumbsDown = (extCount===0 && thumbExt && thumbDown);
+    if(isThumbsUp && now-gesture.lastThumbT>500){
+      gesture.lastThumbT = now;
+      state.size = Math.min(3, +(state.size + 0.15*sens).toFixed(2));
+      $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
+      mat.size = state.size;
+      flashTag('g-thumb-up'); setLive(true,'👍 SIZE '+state.size.toFixed(1)); return;
+    }
+    if(isThumbsDown && now-gesture.lastThumbT>500){
+      gesture.lastThumbT = now;
+      state.size = Math.max(0.4, +(state.size - 0.15*sens).toFixed(2));
+      $('size').value = state.size; $('v-size').textContent = state.size.toFixed(1);
+      mat.size = state.size;
+      flashTag('g-thumb-dn'); setLive(true,'👎 SIZE '+state.size.toFixed(1)); return;
     }
 
     // 捏合 = 点击 / 双击爆裂
@@ -1224,7 +1283,9 @@
     }
 
     // 水平滑动切模型（食指伸直 + 中指收起，避免与张开冲突）
-    const isPoint = (Ei && !Em && !Er && !Ep);
+    // fingerpose point 主判 + 启发式傅助
+    const isPoint = (fpTop === 'point' && fpScore >= 8.0) ||
+                    (Ei && !Em && !Er && !Ep);
     if(isPoint){
       if(gesture.prevX!=null){
         const dx = gesture.xSm - gesture.prevX;
@@ -1246,8 +1307,10 @@
     }
 
     // 张开手 → openness 控制 scale；垂直移动 → 调整旋转速度
-    // 【优化】同时使用 extCount≥4 作为开掌傅助判定，避免 openness 标定偏差造成失败
-    const palmOpen = (gesture.opennessSm > 0.7) || (extCount >= 4 && gesture.opennessSm > 0.45);
+    // fingerpose open_palm 主判 + 启发式傅助 (双重保险)
+    const palmOpen = (fpTop === 'open_palm' && fpScore >= 8.0) ||
+                     (gesture.opennessSm > 0.7) ||
+                     (extCount >= 4 && gesture.opennessSm > 0.45);
     if(palmOpen){
       const target = THREE.MathUtils.clamp(gesture.opennessSm*1.3, 0.35, 1.7);
       // 灵敏度也提升收敛速度
