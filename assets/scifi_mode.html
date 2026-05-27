@@ -1226,10 +1226,17 @@
 
       // ── 张开手 → 距离驱动 zoom + 挥动方向驱动旋转 ──
       if(palmOpen){
-        // 手离镜头远近：handSize 大 = 近，小 = 远（经验值 0.05~0.20）
-        const hs = handSize;
-        const zT = THREE.MathUtils.lerp(720, 160,
-                     THREE.MathUtils.smoothstep(hs, 0.06, 0.18));
+        // 【手到镜头远近】用 21 个 landmark 的 bounding box 对角线，比单根线更稳
+        let minX=1,maxX=0,minY=1,maxY=0;
+        for(const p of h){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; }
+        const handDiag = Math.hypot(maxX-minX, maxY-minY);
+        // 平滑（避免单帧噪声）
+        if(gesture.handDiagSm == null) gesture.handDiagSm = handDiag;
+        gesture.handDiagSm += (handDiag - gesture.handDiagSm) * 0.25;
+        // 经验范围：手伸远 ≈ 0.12，手贴近镜头 ≈ 0.55；超出 clamp
+        const hd = gesture.handDiagSm;
+        const zT = THREE.MathUtils.lerp(720, 140,
+                     THREE.MathUtils.smoothstep(hd, 0.14, 0.50));
         state.camZoomTarget = zT;
 
         // 挥动方向（帧间速度）→ 累计旋转（持续挥手持续转）
@@ -1246,7 +1253,7 @@
         }
         gesture.prevCinX = gesture.xSm;
         gesture.prevCinY = gesture.ySm;
-        setLive(true, '🖐 距离Z='+zT.toFixed(0)+' YAW='+state.camYawTarget.toFixed(2));
+        setLive(true, '🖐 D='+hd.toFixed(2)+' Z='+zT.toFixed(0)+' YAW='+state.camYawTarget.toFixed(2));
       } else {
         gesture.prevCinX = null;
         gesture.prevCinY = null;
