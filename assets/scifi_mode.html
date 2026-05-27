@@ -790,8 +790,9 @@
     tools.forEach((t,i)=>{
       const tex = drawToolCard(t);
       const mat = new THREE.SpriteMaterial({
-        map: tex, transparent:true, opacity:0,
+        map: tex, transparent:true, opacity:0.55,
         depthWrite:false, depthTest:false,
+        blending: THREE.AdditiveBlending,
       });
       const sp = new THREE.Sprite(mat);
       const home = homeFor(i, N);
@@ -841,15 +842,15 @@
       }
       toolsState.on = true;
       toolsState.group.visible = true;
-      toolsState.targetAlpha = 1;
+      toolsState.targetAlpha = 1;          // 聚焦模式：卡片提亮
       scifiCursor.classList.add('on');
       $('btn-tools').style.color = '#22c55e';
       $('btn-tools').style.textShadow = '0 0 12px rgba(34,197,94,.8)';
-      toolToast('🧰 用手势指向工具 · 捏合启动 · 再点 🧰 收回');
-      state.camTargetZ = 540;
+      toolToast('🧰 手势聚焦·指向工具 · 捏合启动');
+      state.camTargetZ = 520;
     }else{
       toolsState.on = false;
-      toolsState.targetAlpha = 0;
+      toolsState.targetAlpha = 0.55;       // 退出后仍漂浮于粒子中
       scifiCursor.classList.remove('on','hover','pinch');
       $('btn-tools').style.color = '';
       $('btn-tools').style.textShadow = '';
@@ -858,6 +859,17 @@
     }
   }
   $('btn-tools').addEventListener('click', ()=>toggleTools());
+
+  // 【融合】页面加载后立即将工具卡片嵌入场景（低透明度·与粒子同在）
+  (async function(){
+    const tools = await fetchTools();
+    if(tools.length){
+      buildToolSprites(tools);
+      toolsState.loaded = true;
+      toolsState.group.visible = true;
+      toolsState.targetAlpha = 0.55;
+    }
+  })();
 
   const _raycaster = new THREE.Raycaster();
   function updateCursorScreen(px, py){
@@ -874,9 +886,8 @@
   });
   function gpMove(nx, ny){
     if(!toolsState.on) return;
-    const px = toolsState.cursor.x + (nx - toolsState.cursor.x)*0.5;
-    const py = toolsState.cursor.y + (ny - toolsState.cursor.y)*0.5;
-    updateCursorScreen(px, py);
+    // 高跟随：手势已做 EMA，这里几乎 1:1 跟随
+    updateCursorScreen(nx, ny);
   }
   function gpPinch(on){
     if(!toolsState.on) return;
@@ -1088,12 +1099,12 @@
     gesture.ySm += (rawY - gesture.ySm) * k;
     gesture.active = true;
 
-    // 🧰 工具星座开启时 → 食指尖驱动屏幕光标 + 捏合启动
+    // 🧰 工具星座开启时 → 食指尖驱动屏幕光标 + 捏合启动（方向修正：MediaPipe selfieMode 已镜像，不再二次反转）
     if(window.__scifiGP && window.__scifiGP.state && window.__scifiGP.state.on){
-      const ix = (1 - idxTip.x) * innerWidth;
+      const ix = idxTip.x * innerWidth;
       const iy = idxTip.y * innerHeight;
       window.__scifiGP.move(ix, iy);
-      window.__scifiGP.pinch(pinchRaw < 0.32);
+      window.__scifiGP.pinch(pinchRaw < 0.36);
     }
 
     // ────────── 双手缩放 ──────────
