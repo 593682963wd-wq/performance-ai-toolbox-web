@@ -1248,15 +1248,14 @@
           const dvy = gesture.ySm - gesture.prevCinY;
           const sp  = Math.hypot(dvx, dvy);
           const _now = performance.now();
-          // 需要明显挥动 (sp>0.012) 且距离上次注入≥120ms，避免连续粘附
-          if(sp > 0.012 && (_now - (gesture.lastFlickT||0)) > 120){
+          // 提高阈值：必须明显挥动 (sp>0.025) 且距上次冲量≥200ms，避免随便一动就转
+          if(sp > 0.025 && (_now - (gesture.lastFlickT||0)) > 200){
             gesture.lastFlickT = _now;
-            // 一次冲量：手挥动产生角速度
-            state.camYawVel   += dvx * 6.0 * state.sensitivity;
-            state.camPitchVel += -dvy * 5.0 * state.sensitivity;
-            // 上限避免炸
-            state.camYawVel   = THREE.MathUtils.clamp(state.camYawVel,   -0.08, 0.08);
-            state.camPitchVel = THREE.MathUtils.clamp(state.camPitchVel, -0.06, 0.06);
+            // 冲量更小：避免随便一碰就转飞
+            state.camYawVel   += dvx * 2.0 * state.sensitivity;
+            state.camPitchVel += -dvy * 1.6 * state.sensitivity;
+            state.camYawVel   = THREE.MathUtils.clamp(state.camYawVel,   -0.05, 0.05);
+            state.camPitchVel = THREE.MathUtils.clamp(state.camPitchVel, -0.04, 0.04);
           }
         }
         gesture.prevCinX = gesture.xSm;
@@ -1448,7 +1447,10 @@
     // 旋转
     if(!state.rotFrozen){
       points.rotation.y += dt * state.rot * 0.5;
-      points.rotation.x = Math.sin(t*0.1) * 0.06;
+      // 电影模式下不再覆盖 pitch（让手势冲量驱动）；否则保留自然摆动
+      if(!state.cinemaMode){
+        points.rotation.x = Math.sin(t*0.1) * 0.06;
+      }
     }
 
     // 粒子动画：home + 噪声 + 全局缩放 + 鼠标推力 + 爆裂衰减
@@ -1545,21 +1547,21 @@
       camera.position.z += (state.camTargetZ - camera.position.z)*0.06;
     }
 
-    // 🎬 电影模式：手势驱动的相机 zoom + 冲量旋转（皮球/地球仪手感）
+    // 🎬 电影模式：手势驱动的 【场景旋转】 + 相机 zoom（转场景不转相机——像握地球仪，不会黑屏）
     if(state.cinemaMode){
       if(state.camZoomTarget != null){
         camera.position.z += (state.camZoomTarget - camera.position.z) * 0.08;
       }
-      // 冲量模型：相机旋转积分角速度，每帧衰减（damping 0.93/帧，停手后约 1 秒衰减完）
-      camera.rotation.y += state.camYawVel;
-      camera.rotation.x += state.camPitchVel;
-      state.camYawVel   *= 0.93;
-      state.camPitchVel *= 0.93;
+      // 冲量模型：场景旋转积分角速度，每帧衰减（damping 0.90/帧，停手后约 0.7 秒衰减完）
+      points.rotation.y += state.camYawVel;
+      points.rotation.x += state.camPitchVel;
+      state.camYawVel   *= 0.90;
+      state.camPitchVel *= 0.90;
       // 极小值归零，避免长期漂移
-      if(Math.abs(state.camYawVel)   < 0.0002) state.camYawVel = 0;
-      if(Math.abs(state.camPitchVel) < 0.0002) state.camPitchVel = 0;
-      // pitch 软限位
-      camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x, -0.9, 0.9);
+      if(Math.abs(state.camYawVel)   < 0.0003) state.camYawVel = 0;
+      if(Math.abs(state.camPitchVel) < 0.0003) state.camPitchVel = 0;
+      // pitch 软限位（防止场景翻过去）
+      points.rotation.x = THREE.MathUtils.clamp(points.rotation.x, -0.7, 0.7);
     }
 
     // 工具星座更新
