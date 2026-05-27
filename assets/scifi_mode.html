@@ -233,8 +233,8 @@
       <input type="color" id="color2" value="#bf6bff">
       <label>粒径 <span class="val" id="v-size">1.4</span></label>
       <input type="range" id="size" min="0.4" max="3" step="0.1" value="1.4">
-      <label>亮度 <span class="val" id="v-glow">0.55</span></label>
-      <input type="range" id="glow" min="0.3" max="2.2" step="0.05" value="0.55">
+      <label>亮度 <span class="val" id="v-glow">0.30</span></label>
+      <input type="range" id="glow" min="0.0" max="2.2" step="0.05" value="0.30">
     </div>
 
     <div class="group">
@@ -360,13 +360,15 @@
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.55; // 压低高光，避免加色混合变白刮眼
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 5000);
   camera.position.set(0, 0, 380);
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 0.55, 0.6, 0.0);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.innerHeight), 0.30, 0.55, 0.05);
   composer.addPass(bloom);
 
   // ═══════════ 2. 粒子贴图（圆形软晕）═══════════
@@ -564,7 +566,7 @@
 
   // ═══════════ 4. 控件绑定 ═══════════
   const state = {
-    color1:'#4fc3f7', color2:'#bf6bff', size:1.4, glow:0.55,
+    color1:'#4fc3f7', color2:'#bf6bff', size:1.4, glow:0.30,
     rot:0.4, noise:0.6, gesture:true, mouse:true,
     scale:1.0, // 由手势驱动
     explodeUntil:0,
