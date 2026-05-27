@@ -1212,39 +1212,57 @@
       gesture.twoHand=false; gesture.twoDistSm=null;
     }
 
-    // 🎬 ═════ 电影模式（单手主控）═════
-    // 张开手 → 放大（camera.z 拉近）；握拳 → 缩小（拉远）；
-    // 手位置（屏幕中心为锚）→ 相机 yaw/pitch；连续平滑、无离散触发，最顺手。
+    // 🎬 ═════ 电影模式（单手主控 v2）═════
+    // 张开手：手离镜头【近→放大 / 远→缩小】；【挥动方向】驱动场景旋转
+    // 食指伸出：投射光标到工具卡（自动放大）；捏合 = 点击启动
     if(state.cinemaMode){
-      // openness 已在上方算好 (opennessSm)，范围 ~0.2(拳)~1.2(全张)
-      const op = THREE.MathUtils.clamp(gesture.opennessSm, 0.20, 1.10);
-      // 映射：拳 0.20 → 720（远）；张 1.10 → 160（近）
-      const zT = THREE.MathUtils.lerp(720, 160,
-                   THREE.MathUtils.smoothstep(op, 0.25, 1.00));
-      state.camZoomTarget = zT;
+      // 各指 ext（用于识别食指）
+      const _ext = (tip, pip) =>
+        Math.hypot(h[tip].x-wrist.x, h[tip].y-wrist.y) >
+        Math.hypot(h[pip].x-wrist.x, h[pip].y-wrist.y) * 1.04;
+      const Ei2 = _ext(8,6), Em2 = _ext(12,10), Er2 = _ext(16,14), Ep2 = _ext(20,18);
+      const pointMode = Ei2 && !Em2 && !Er2 && !Ep2;
+      const palmOpen  = gesture.opennessSm > 0.65 && !pointMode;
 
-      // 手位置 → 相机 yaw/pitch（死区 ±0.06，灵敏度 0.8/0.55）
-      // xSm = 1-wrist.x，ySm = wrist.y，已经在 [0,1] 范围且镜像正确
-      const cx = gesture.xSm - 0.5;
-      const cy = gesture.ySm - 0.5;
-      const DZ = 0.06;
-      const axx = Math.abs(cx) < DZ ? 0 : (cx - Math.sign(cx)*DZ);
-      const ayy = Math.abs(cy) < DZ ? 0 : (cy - Math.sign(cy)*DZ);
-      state.camYawTarget   = THREE.MathUtils.clamp(axx * 0.9 * state.sensitivity, -0.55, 0.55);
-      state.camPitchTarget = THREE.MathUtils.clamp(-ayy * 0.65 * state.sensitivity, -0.45, 0.45);
+      // ── 张开手 → 距离驱动 zoom + 挥动方向驱动旋转 ──
+      if(palmOpen){
+        // 手离镜头远近：handSize 大 = 近，小 = 远（经验值 0.05~0.20）
+        const hs = handSize;
+        const zT = THREE.MathUtils.lerp(720, 160,
+                     THREE.MathUtils.smoothstep(hs, 0.06, 0.18));
+        state.camZoomTarget = zT;
 
-      // 实时反馈
-      const tag = op < 0.35 ? '✊ 缩' : op > 0.85 ? '🖐 放' : '·';
-      setLive(true, '🎬 '+tag+' Z='+zT.toFixed(0)+' yaw='+state.camYawTarget.toFixed(2));
+        // 挥动方向（帧间速度）→ 累计旋转（持续挥手持续转）
+        if(gesture.prevCinX != null){
+          const dvx = gesture.xSm - gesture.prevCinX;
+          const dvy = gesture.ySm - gesture.prevCinY;
+          const sp  = Math.hypot(dvx, dvy);
+          if(sp > 0.008){ // 死区，停手就停转
+            state.camYawTarget   += dvx * 2.8 * state.sensitivity;
+            state.camPitchTarget += -dvy * 2.2 * state.sensitivity;
+            state.camYawTarget   = THREE.MathUtils.clamp(state.camYawTarget,   -Math.PI*1.2, Math.PI*1.2);
+            state.camPitchTarget = THREE.MathUtils.clamp(state.camPitchTarget, -0.9, 0.9);
+          }
+        }
+        gesture.prevCinX = gesture.xSm;
+        gesture.prevCinY = gesture.ySm;
+        setLive(true, '🖐 距离Z='+zT.toFixed(0)+' YAW='+state.camYawTarget.toFixed(2));
+      } else {
+        gesture.prevCinX = null;
+        gesture.prevCinY = null;
+      }
 
-      // 仍然保留：捏合 → 爆裂（科幻电影里常见的「按一下」交互）
-      const pinchTh = 0.30 + (1-state.sensitivity)*0.10;
+      // ── 食指：光标投射 + 捏合启动 ──
+      // __scifiGP.move/pinch 已在上方按 idxTip 实时驱动（命中 sprite 自动放大 1.45×）
+      // 这里只确认 pinch 仍可双击触发爆裂
       const _nowC = performance.now();
+      const pinchTh = 0.30 + (1-state.sensitivity)*0.10;
       if(gesture.pinchSm < pinchTh && !gesture.pinchActive){
         gesture.pinchActive = true;
-        if(_nowC-gesture.lastTapT < 420){ $('btn-explode').click(); flashTag('g-pinch'); setLive(true,'🤏🤏 EXPLODE'); }
+        if(_nowC - gesture.lastTapT < 420){ $('btn-explode').click(); flashTag('g-pinch'); setLive(true,'🤏🤏 EXPLODE'); }
         gesture.lastTapT = _nowC;
-      }else if(gesture.pinchSm >= pinchTh){
+        if(pointMode){ flashTag('g-pinch'); setLive(true,'👉🤏 TAP'); }
+      } else if(gesture.pinchSm >= pinchTh){
         gesture.pinchActive = false;
       }
       return; // 跳过下方的离散手势分支
