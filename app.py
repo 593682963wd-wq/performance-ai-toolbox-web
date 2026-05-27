@@ -131,6 +131,24 @@ st.markdown(
         </div>
     </div>
 </div>
+
+<div class="tool-card" style="background:linear-gradient(135deg,rgba(139,92,246,.16) 0%,rgba(79,195,247,.10) 100%);border-color:rgba(139,92,246,.45);">
+    <div style="display:flex;align-items:center;gap:14px;">
+        <div class="icon">🌌</div>
+        <div>
+            <div class="title">科幻模式 · 全息粒子</div>
+            <div class="summary">
+                Three.js + MediaPipe 全息粒子交互系统。通过摄像头单手张合控制粒子缩放扩散，
+                支持土星 / 圆球 / 山脉 / 烟花 / DNA / 文字 6 套模型，滑动切换、双手缩放、捏合点击。
+                <span style="color:#bf6bff;font-weight:600">独立沉浸界面，不影响其它工具。</span>
+            </div>
+            <div>
+                <span class="tag">Three.js</span><span class="tag">MediaPipe</span>
+                <span class="tag">手势</span><span class="tag">WebGL</span>
+            </div>
+        </div>
+    </div>
+</div>
 """,
     unsafe_allow_html=True,
 )
