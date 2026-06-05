@@ -1,9 +1,10 @@
 """性能 AI 工具台 — 入口页 (landing)。
 
-将 3 个独立 Streamlit 工具汇总到同一个 Web 站点：
+将多个独立 Streamlit 工具汇总到同一个 Web 站点：
   1. 机场障碍物分析    (tools_obstacle)
   2. 机场新旧数据对比  (tools_compare)
   3. 航线载量分析      (tools_routeload)
+  4. 带班AI分飞机      (tools_dispatch)
 
 每个工具放在 pages/ 下作为独立页面，独立的 core/ 通过 sys.modules 隔离。
 """
@@ -127,6 +128,24 @@ st.markdown(
             <div>
                 <span class="tag">CFP</span><span class="tag">业载</span>
                 <span class="tag">Word</span><span class="tag">PPT</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="tool-card">
+    <div style="display:flex;align-items:center;gap:14px;">
+        <div class="icon">✈️</div>
+        <div>
+            <div class="title">带班AI分飞机</div>
+            <div class="summary">
+                上传次日动态列表，AI 把每架飞机当日全部航班作为整体，按总任务量、时段忙闲、
+                C/B 类机场、区域分布、过夜地、相近时刻冲突多目标均衡，自动分配到放行签派一、
+                放行签派二两个席位，导出分配 Excel。实测综合均衡度优于人工。
+            </div>
+            <div>
+                <span class="tag">动态列表</span><span class="tag">席位均衡</span>
+                <span class="tag">多目标</span><span class="tag">Excel</span>
             </div>
         </div>
     </div>
